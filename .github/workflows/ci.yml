@@ -1,0 +1,241 @@
+name: OpenClaw Colony CI
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ── 1. Python backend tests ────────────────────────────────────────────────
+  python-tests:
+    name: Python Tests (backend + colony + Stripe bridge)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install backend dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Run full test suite (colony + Stripe bridge)
+        env:
+          PYTHONPATH: backend:backend/colony-agents:backend/colony-agents/orchestrator:backend/love-quality
+          COLONY_AUTH_ENABLED: "false"
+          COLONY_DB_PATH: ":memory:"
+          COLONY_ADMIN_KEY: "ci-admin-secret"
+          # Stripe runs in mock mode (no real key needed in CI)
+          STRIPE_SECRET_KEY: ""
+          STRIPE_WEBHOOK_SECRET: ""
+          STRIPE_COMMUNITY_ACCOUNT: ""
+          STRIPE_CREW_ACCOUNT: ""
+          STRIPE_ARCHITECT_ACCOUNT: ""
+        run: |
+          pytest tests/ -v --tb=short
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-test-results
+          path: .pytest_cache/
+
+  # ── 2. Rust kernel tests ───────────────────────────────────────────────────
+  rust-kernel-tests:
+    name: Rust Kernel Tests (Aethel 3-gate)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.75
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.75"
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            backend/aethel-grid/kernel/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('backend/aethel-grid/kernel/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Run Aethel kernel tests (4 gate tests)
+        working-directory: backend/aethel-grid/kernel
+        run: |
+          cargo test --verbose 2>&1 | tee kernel-test-output.txt
+          # Verify all tests passed with 0 failures
+          grep -E "test result: ok\. [0-9]+ passed; 0 failed" kernel-test-output.txt
+
+      - name: Build release binary
+        working-directory: backend/aethel-grid/kernel
+        run: cargo build --release
+
+      - name: Upload kernel binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: aethel-kernel-binary
+          path: backend/aethel-grid/kernel/target/release/aethel
+
+  # ── 3. TypeScript type check ───────────────────────────────────────────────
+  typescript-typecheck:
+    name: TypeScript Type Check (frontend)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: TypeScript type check
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Build frontend (production)
+        working-directory: frontend
+        run: npm run build
+
+  # ── 4. Love Quality gate check (PR only) ──────────────────────────────────
+  lq-gate-check:
+    name: Love Quality Gate (PR validation)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r backend/requirements.txt
+
+      - name: Run LQ validation on PR diff
+        env:
+          PYTHONPATH: backend:backend/colony-agents:backend/love-quality
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          python - << 'PYEOF'
+          import os, sys
+          sys.path.insert(0, "backend/love-quality")
+          from love_quality_engine import LoveQualityEngine, LQ_THRESHOLD
+
+          engine = LoveQualityEngine()
+          pr_text = f"{os.environ.get('PR_TITLE', '')} {os.environ.get('PR_BODY', '')}"
+
+          lq = engine.score(pr_text, {})
+          print(f"LQ composite score: {lq.composite:.4f}")
+          print(f"Threshold:          {LQ_THRESHOLD}")
+          print(f"Result:             {'PASS' if lq.passed else 'FAIL'}")
+
+          for dim in lq.dimensions:
+              print(f"  {dim.name:20s} raw={dim.raw_score:.3f}  weighted={dim.weighted_score:.3f}")
+
+          if not lq.passed:
+              print(f"\nBLOCKED: {lq.rejection_reason}")
+              sys.exit(1)
+
+          print("\nLove Quality gate: PASS — PR cleared for review.")
+          PYEOF
+
+  # ── 5. Docker build smoke test ─────────────────────────────────────────────
+  docker-build:
+    name: Docker Build Smoke Test
+    runs-on: ubuntu-latest
+    needs: [python-tests, rust-kernel-tests, typescript-typecheck]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.backend
+          push: false
+          tags: openclaw-backend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.frontend
+          push: false
+          tags: openclaw-frontend:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── 6. Stripe bridge smoke test (mock mode) ────────────────────────────────
+  stripe-bridge-smoke:
+    name: Stripe Bridge Smoke Test (mock mode)
+    runs-on: ubuntu-latest
+    needs: [python-tests]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r backend/requirements.txt pytest pytest-asyncio
+
+      - name: Run Stripe bridge tests only
+        env:
+          PYTHONPATH: backend:backend/colony-agents:backend/colony-agents/orchestrator:backend/love-quality
+          COLONY_AUTH_ENABLED: "false"
+          COLONY_DB_PATH: ":memory:"
+          COLONY_ADMIN_KEY: "ci-admin-secret"
+          STRIPE_SECRET_KEY: ""
+          STRIPE_WEBHOOK_SECRET: ""
+          STRIPE_COMMUNITY_ACCOUNT: ""
+          STRIPE_CREW_ACCOUNT: ""
+          STRIPE_ARCHITECT_ACCOUNT: ""
+        run: |
+          pytest tests/test_stripe_bridge.py -v --tb=short -q

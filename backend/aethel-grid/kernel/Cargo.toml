@@ -1,0 +1,29 @@
+[package]
+name        = "aethel-safety-kernel"
+version     = "0.4.0"
+edition     = "2021"
+authors     = ["iAAi33iAAi"]
+description = "OpenClaw Colony — Aethel 3-gate sovereignty safety kernel"
+license     = "MIT"
+rust-version = "1.75"
+
+[[bin]]
+name = "aethel"
+path = "src/main.rs"
+
+[lib]
+name = "aethel_safety_kernel"
+path = "src/aethel_safety_kernel.rs"
+
+[dependencies]
+serde_json = "1"
+
+[profile.release]
+opt-level   = 3
+lto         = true
+codegen-units = 1
+panic       = "abort"
+
+[profile.test]
+opt-level = 0
+debug     = true

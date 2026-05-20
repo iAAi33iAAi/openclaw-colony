@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# Rust build artifacts
+backend/aethel-kernel/target/
+backend/aethel-grid/kernel/target/
+*.whl
+
+# Database files (never commit live data)
+*.db
+*.db-wal
+*.db-shm
+
+# Environment secrets (NEVER commit)
+.env
+.env.local
+.env.production
+*.secret
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Pytest
+.pytest_cache/
+*.pytest_cache/
+htmlcov/
+.coverage
+
+# Logs
+*.log

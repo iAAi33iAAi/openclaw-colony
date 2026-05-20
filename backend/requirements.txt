@@ -1,0 +1,26 @@
+# OpenClaw Colony — Python backend dependencies
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+httpx>=0.27.0          # async HTTP client for inter-service calls
+
+# ── Stripe bridge ─────────────────────────────────────────────────────────────
+stripe>=8.0.0          # Stripe Python SDK (payments, webhooks, transfers)
+
+# ── Persistent lineage (SQLite via SQLAlchemy) ────────────────────────────────
+sqlalchemy>=2.0.0      # ORM + core; uses built-in sqlite3 driver
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+slowapi>=0.1.9         # Starlette/FastAPI rate limiter (sliding window)
+limits>=3.6.0          # Backend for slowapi
+
+# ── API key auth ──────────────────────────────────────────────────────────────
+python-jose[cryptography]>=3.3.0   # JWT utilities (optional future use)
+passlib[bcrypt]>=1.7.4             # Password / key hashing
+
+# ── Async file I/O ────────────────────────────────────────────────────────────
+aiofiles>=23.0.0
+
+# ── Test dependencies (also installed in CI) ─────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.23.0

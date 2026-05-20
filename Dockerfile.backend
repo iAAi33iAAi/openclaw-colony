@@ -1,0 +1,51 @@
+# ── Stage 1: Build Aethel Rust kernel ────────────────────────────────────────
+FROM rust:1.75-slim AS kernel-builder
+
+WORKDIR /build
+COPY backend/aethel-grid/kernel/ ./
+
+RUN cargo build --release
+
+# ── Stage 2: Python backend runtime ──────────────────────────────────────────
+FROM python:3.11-slim AS backend
+
+WORKDIR /app
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy compiled Aethel kernel binary
+COPY --from=kernel-builder /build/target/release/aethel \
+     /app/backend/aethel-grid/kernel/target/release/aethel
+
+# Python dependencies
+COPY backend/requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Application source
+COPY backend/                              ./backend/
+COPY backend/colony-agents/               ./backend/colony-agents/
+COPY backend/love-quality/                ./backend/love-quality/
+
+# Stripe bridge + persistence modules (sit alongside the coordinator)
+# These are already included via backend/ copy above; listed here for clarity:
+#   backend/db.py
+#   backend/auth.py
+#   backend/rate_limit.py
+#   backend/stripe_bridge.py
+
+# Persistent lineage DB directory (mounted as volume in docker-compose)
+RUN mkdir -p /data && chmod 777 /data
+
+# Expose FastAPI port
+EXPOSE 8000
+
+# Health check
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
+
+WORKDIR /app/backend/colony-agents/orchestrator
+CMD ["python", "-m", "uvicorn", "colony_coordinator_v2:app", \
+     "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
