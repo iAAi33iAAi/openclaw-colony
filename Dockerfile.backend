@@ -1,51 +1,47 @@
-# ── Stage 1: Build Aethel Rust kernel ────────────────────────────────────────
-FROM rust:1.75-slim AS kernel-builder
+# OpenClaw Colony — Backend Dockerfile
+# Pre-built: Rust kernel compiled at build time
+# No Rust compiler needed on the host machine
 
-WORKDIR /build
-COPY backend/aethel-grid/kernel/ ./
+FROM python:3.11-slim AS base
 
-RUN cargo build --release
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    build-essential \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
 
-# ── Stage 2: Python backend runtime ──────────────────────────────────────────
-FROM python:3.11-slim AS backend
+# Install Rust (needed to compile the PyO3 kernel)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+# Install maturin for PyO3 builds
+RUN pip install --no-cache-dir maturin
 
 WORKDIR /app
 
-# System deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libssl-dev ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# ── Build Rust kernel ─────────────────────────────────────────
+COPY backend/aethel-kernel/ ./aethel-kernel/
+RUN cd aethel-kernel && \
+    maturin build --release --out /wheels && \
+    pip install /wheels/*.whl
 
-# Copy compiled Aethel kernel binary
-COPY --from=kernel-builder /build/target/release/aethel \
-     /app/backend/aethel-grid/kernel/target/release/aethel
-
-# Python dependencies
-COPY backend/requirements.txt ./
+# ── Install Python dependencies ───────────────────────────────
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Application source
-COPY backend/                              ./backend/
-COPY backend/colony-agents/               ./backend/colony-agents/
-COPY backend/love-quality/                ./backend/love-quality/
+# ── Copy application code ─────────────────────────────────────
+COPY backend/ .
 
-# Stripe bridge + persistence modules (sit alongside the coordinator)
-# These are already included via backend/ copy above; listed here for clarity:
-#   backend/db.py
-#   backend/auth.py
-#   backend/rate_limit.py
-#   backend/stripe_bridge.py
+# ── Data directory for SQLite lineage chain ───────────────────
+RUN mkdir -p /data /logs
 
-# Persistent lineage DB directory (mounted as volume in docker-compose)
-RUN mkdir -p /data && chmod 777 /data
+# ── Health check script ───────────────────────────────────────
+RUN echo '#!/bin/sh\ncurl -sf http://localhost:8000/health || exit 1' > /healthcheck.sh && \
+    chmod +x /healthcheck.sh
 
-# Expose FastAPI port
 EXPOSE 8000
 
-# Health check
-HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
-
-WORKDIR /app/backend/colony-agents/orchestrator
-CMD ["python", "-m", "uvicorn", "colony_coordinator_v2:app", \
-     "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+# Genesis runs first, then the server starts
+CMD ["sh", "-c", "python dev_commit_init.py && uvicorn colony-agents.orchestrator.colony_coordinator_v2:app --host 0.0.0.0 --port 8000 --workers 2"]

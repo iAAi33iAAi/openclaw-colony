@@ -1,0 +1,50 @@
+# OpenClaw Colony — Caddy Reverse Proxy
+# Automatic HTTPS. Zero configuration.
+# Replace {$COLONY_NODE_URL} with your domain in .env
+
+{$COLONY_DOMAIN:localhost} {
+
+    # API — backend
+    handle /api/* {
+        uri strip_prefix /api
+        reverse_proxy backend:8000
+    }
+
+    # Federation endpoints
+    handle /federation/* {
+        reverse_proxy backend:8000
+    }
+
+    # Health check
+    handle /health {
+        reverse_proxy backend:8000
+    }
+
+    # WebSocket support for live dashboard
+    handle /ws/* {
+        reverse_proxy backend:8000 {
+            header_up Upgrade {http.upgrade}
+            header_up Connection {http.headers.Connection}
+        }
+    }
+
+    # Frontend — everything else
+    handle {
+        reverse_proxy frontend:80
+    }
+
+    # Security headers
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # Logging
+    log {
+        output file /logs/caddy.log
+        format json
+    }
+}

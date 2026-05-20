@@ -1,89 +1,85 @@
-version: "3.9"
+# OpenClaw Colony — Production Docker Compose
+# One command: docker compose up -d
+# Everything runs. No configuration required beyond .env
 
-# ── OpenClaw Colony — Docker Compose ──────────────────────────────────────────
-# One-command quickstart:  docker compose up --build
-#
-# Services:
-#   backend   — FastAPI colony coordinator v2 + 7 agents + Aethel kernel + Stripe bridge (port 8000)
-#   frontend  — React/TypeScript UI served via Nginx (port 3000)
-#
-# Required secrets (set in .env or export before running):
-#   STRIPE_SECRET_KEY          — sk_live_… or sk_test_…  (leave blank for mock mode)
-#   STRIPE_WEBHOOK_SECRET      — whsec_…  (from Stripe dashboard)
-#   STRIPE_COMMUNITY_ACCOUNT   — acct_…  (84% MANNA recipient)
-#   STRIPE_CREW_ACCOUNT        — acct_…  (15% MANNA recipient)
-#   STRIPE_ARCHITECT_ACCOUNT   — acct_…  (1%  MANNA recipient)
-#   COLONY_ADMIN_KEY           — strong random secret for /admin/* routes
-#
-# The Rust Aethel kernel is compiled inside the backend multi-stage build.
-# No separate kernel container is needed — it runs as a subprocess of the backend.
+version: "3.9"
 
 services:
 
-  # ── Backend ────────────────────────────────────────────────────────────────
+  # ── Backend: Aethel Safety Kernel + FastAPI ──────────────────
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    container_name: openclaw-backend
+    container_name: colony-backend
     restart: unless-stopped
+    env_file: .env
+    environment:
+      - COLONY_DB_PATH=/data/colony.db
+    volumes:
+      - colony-data:/data          # persistent SQLite lineage chain
+      - colony-logs:/logs
     ports:
       - "8000:8000"
-    environment:
-      - PYTHONUNBUFFERED=1
-      - PYTHONPATH=/app/backend:/app/backend/colony-agents:/app/backend/colony-agents/orchestrator:/app/backend/love-quality
-
-      # ── Stripe bridge ──────────────────────────────────────────────────────
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY:-}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
-      - STRIPE_COMMUNITY_ACCOUNT=${STRIPE_COMMUNITY_ACCOUNT:-}
-      - STRIPE_CREW_ACCOUNT=${STRIPE_CREW_ACCOUNT:-}
-      - STRIPE_ARCHITECT_ACCOUNT=${STRIPE_ARCHITECT_ACCOUNT:-}
-
-      # ── Persistent lineage DB ──────────────────────────────────────────────
-      - COLONY_DB_PATH=/data/colony.db
-
-      # ── API key auth ───────────────────────────────────────────────────────
-      - COLONY_AUTH_ENABLED=${COLONY_AUTH_ENABLED:-true}
-      - COLONY_ADMIN_KEY=${COLONY_ADMIN_KEY:-change-me-in-production}
-
-      # ── Rate limits (requests/minute, override as needed) ──────────────────
-      - RATE_PROCESS=${RATE_PROCESS:-30}
-      - RATE_ADMIN=${RATE_ADMIN:-60}
-      - RATE_WEBHOOK=${RATE_WEBHOOK:-120}
-
-    volumes:
-      - colony-data:/data
-
     healthcheck:
-      test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - colony-net
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    command: >
+      sh -c "
+        python dev_commit_init.py &&
+        uvicorn colony-agents.orchestrator.colony_coordinator_v2:app
+          --host 0.0.0.0
+          --port 8000
+          --workers 2
+          --log-level info
+      "
 
-  # ── Frontend ───────────────────────────────────────────────────────────────
+  # ── Frontend: React Dashboard ────────────────────────────────
   frontend:
     build:
       context: .
       dockerfile: Dockerfile.frontend
-    container_name: openclaw-frontend
+    container_name: colony-frontend
     restart: unless-stopped
     ports:
       - "3000:80"
     depends_on:
       backend:
         condition: service_healthy
-    networks:
-      - colony-net
+    environment:
+      - VITE_API_URL=http://localhost:8000
+
+  # ── Caddy: Reverse proxy + automatic HTTPS ───────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: colony-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - backend
+      - frontend
+    profiles:
+      - production    # only runs with: docker compose --profile production up
 
 volumes:
   colony-data:
     driver: local
+  colony-logs:
+    driver: local
+  caddy-data:
+    driver: local
+  caddy-config:
+    driver: local
 
 networks:
-  colony-net:
-    driver: bridge
+  default:
+    name: colony-network
