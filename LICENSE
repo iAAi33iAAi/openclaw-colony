@@ -1,4 +1,4 @@
-                    GNU GENERAL PUBLIC LICENSE
+                    GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 29 June 2007
 
  Copyright (C) 2025-2026 human_001 — Principal Architect, OpenClaw Colony
@@ -13,7 +13,7 @@
 
                             PREAMBLE
 
-  The GNU General Public License is a free, copyleft license for
+  The GNU Affero General Public License is a free, copyleft license for
 software and other kinds of works.
 
   When we speak of free software, we are referring to freedom, not
@@ -21,9 +21,9 @@ price.  Our General Public Licenses are designed to make sure that you
 have the freedom to share and change all versions of a program--to
 make sure it remains free software for all its users.
 
-  The GNU General Public License version 3 is the license under which
+  The GNU Affero General Public License version 3 is the license under which
 OpenClaw Colony is distributed. Any derivative work must also be
-distributed under GPL v3. The giving must continue.
+distributed under AGPL v3. The giving must continue.
 
   THE ARCHITECT'S COVENANT (non-waivable):
   The MANNA split — 1% to the Architect, 84% to the Community,
@@ -32,10 +32,10 @@ distributed under GPL v3. The giving must continue.
   or governance vote. It is not a royalty. It is a covenant.
   Decimal('0.01') × V_h — forever.
 
-  For the full GPL v3 license text, see:
-  https://www.gnu.org/licenses/gpl-3.0.txt
+  For the full AGPL v3 license text, see:
+  https://www.gnu.org/licenses/agpl-3.0.txt
 
-  ADDITIONAL TERMS (per GPL v3 Section 7):
+  ADDITIONAL TERMS (per AGPL v3 Section 7):
 
   a) The Architect's Covenant (1% MANNA split) must be preserved
      in all derivative works and deployments.
@@ -77,5 +77,5 @@ distributed under GPL v3. The giving must continue.
   "The people who needed it could not wait for the people with money
    to decide it was worth building."
 
-  GPL v3 + Architect's Covenant
+  AGPL v3 + Architect's Covenant
   2025-2026
