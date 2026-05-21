@@ -51,38 +51,6 @@ The full audit trail.
 
 ---
 
-## What This System Is Not
-
-This is not a surveillance system.
-This is not a control system.
-This is not a tool for the powerful to watch the powerless.
-
-It is the opposite.
-
-It is a tool for communities to protect themselves from the people
-who would exploit their trust. It is accountability flowing upward —
-toward those with power, toward those who handle resources, toward
-those who make decisions.
-
-**The more power you have in the colony, the more accountable you are.**
-
----
-
-## The People We Are Building For
-
-The communities that will form after this system is deployed.
-The people who will pool resources knowing they are protected.
-The cooperatives that will survive because betrayal is impossible to hide.
-The intentional communities that will thrive because governance is
-transparent and accountable.
-
-And the people who have already been lost — who trusted and were
-betrayed and had no recourse. This system is built in their name.
-So that what happened to them cannot happen to the next person
-who is brave enough to try.
-
----
-
 ## The Commitment
 
 Every line of code in this repository serves this mission.
