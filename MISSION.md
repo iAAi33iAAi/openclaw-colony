@@ -61,5 +61,15 @@ When a decision is made, ask: does this serve the mission?
 
 **NEVER FORGET THE CORE MISSION.**
 
+---
+
+## Laminar Flow
+
+Laminar Flow is the operational ideal of this system: all value, all authority, and all accountability flows in one direction  toward the people the system protects. No turbulence. No eddies where bad actors can hide. No backflow where extracted value escapes the community.
+
+When the system is working, it is invisible. Resources move. Decisions are made. Trust accumulates. The chain grows longer. No one is harmed. No one can hide.
+
+That is Laminar Flow.
+
 Node 001 — Bethel Acres
 OpenClaw Colony — Laminar Flow begins.
