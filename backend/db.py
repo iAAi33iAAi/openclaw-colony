@@ -24,7 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 # ── Database path ─────────────────────────────────────────────────────────────
-DB_PATH = os.environ.get("COLONY_DB_PATH", "colony.db")
+DB_PATH = os.environ.get("COLONY_DB_PATH", "/data/colony.db")
 
 # Special handling for :memory: — use shared-cache URI so all connections
 # within the same process share the same in-memory database (needed for tests).
