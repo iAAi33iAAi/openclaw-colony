@@ -11,13 +11,13 @@ Given.
 The code is given.
 The architecture is given.
 The cryptography is given.
-The 705 tests are given.
+The 728 tests are given.
 
 Given to any community that needs it.
 Given to any cooperative that is trying.
 Given to any person who is brave enough to pool their life with others.
 
-**Given without condition. Given without expectation. Given because giving is the point.**
+**Given without financial condition. Given without expectation. Given because giving is the point.**
 
 ---
 
@@ -33,7 +33,7 @@ There is no extraction line.
 There is no investor line.
 There is no platform fee line.
 
-**When the people who create the value are the same people who receive the value, the system is self-sustaining.**
+When the people who create the value are the same people who receive the value, the system is self-sustaining.
 
 ---
 
@@ -53,8 +53,6 @@ Not payment. Not credit. Not permission.
 
 Just the continuation of the giving.
 
----
-
-*Node 001 — Bethel Acres*
-*OpenClaw Colony*
-*Given freely. Forever.*
+Node 001  Bethel Acres
+OpenClaw Colony
+Given freely. Forever.
