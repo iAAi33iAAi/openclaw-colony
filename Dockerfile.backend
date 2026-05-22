@@ -44,4 +44,4 @@ RUN echo '#!/bin/sh\ncurl -sf http://localhost:8000/health || exit 1' > /healthc
 EXPOSE 8000
 
 # Genesis runs first, then the server starts
-CMD ["sh", "-c", "python dev_commit_init.py && uvicorn colony-agents.orchestrator.colony_coordinator_v2:app --host 0.0.0.0 --port 8000 --workers 2"]
+CMD ["sh", "-c", "python dev_commit_init.py && uvicorn colony-agents.orchestrator.colony_coordinator_v2:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"
