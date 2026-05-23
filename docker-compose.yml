@@ -6,7 +6,7 @@ version: "3.9"
 
 services:
 
-  # ── Backend: Aethel Safety Kernel + FastAPI ──────────────────
+  # ── Backend: Aethel Safety Kernel + FastAPI ──────────────────────────
   backend:
     build:
       context: .
@@ -17,7 +17,7 @@ services:
     environment:
       - COLONY_DB_PATH=/data/colony.db
     volumes:
-      - colony-data:/data          # persistent SQLite lineage chain
+      - colony-data:/data
       - colony-logs:/logs
     ports:
       - "8000:8000"
@@ -26,18 +26,10 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
-    command: >
-      sh -c "
-        python dev_commit_init.py &&
-        uvicorn colony-agents.orchestrator.colony_coordinator_v2:app
-          --host 0.0.0.0
-          --port 8000
-          --workers 2
-          --log-level info
-      "
+      start_period: 60s
+    command: ["sh", "-c", "python dev_commit_init.py && uvicorn colony-agents.orchestrator.colony_coordinator_v2:app --host 0.0.0.0 --port 8000 --workers 1 --log-level info"]
 
-  # ── Frontend: React Dashboard ────────────────────────────────
+  # ── Frontend: React Dashboard ────────────────────────────────────────
   frontend:
     build:
       context: .
@@ -52,32 +44,10 @@ services:
     environment:
       - VITE_API_URL=http://localhost:8000
 
-  # ── Caddy: Reverse proxy + automatic HTTPS ───────────────────
-  caddy:
-    image: caddy:2-alpine
-    container_name: colony-caddy
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - backend
-      - frontend
-    profiles:
-      - production    # only runs with: docker compose --profile production up
-
 volumes:
   colony-data:
     driver: local
   colony-logs:
-    driver: local
-  caddy-data:
-    driver: local
-  caddy-config:
     driver: local
 
 networks:
