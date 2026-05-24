@@ -3,9 +3,9 @@ OpenClaw Colony — Stripe Bridge
 Handles MANNA payment splits on every APPROVED task.
 
 MANNA distribution (from Resources agent spec):
-  84% → Community Pool   (Stripe destination account: STRIPE_COMMUNITY_ACCOUNT)
+  82% → Community Pool   (Stripe destination account: STRIPE_COMMUNITY_ACCOUNT)
   15% → Crew             (Stripe destination account: STRIPE_CREW_ACCOUNT)
-   1% → Architect        (Stripe destination account: STRIPE_ARCHITECT_ACCOUNT)
+   3% → Architect        (Stripe destination account: STRIPE_ARCHITECT_ACCOUNT)
 
 Environment variables required for live mode:
   STRIPE_SECRET_KEY          sk_live_... or sk_test_...
@@ -54,9 +54,9 @@ else:
 @dataclass
 class MannaSplit:
     total_cents:      int
-    community_cents:  int   # 84%
+    community_cents:  int   # 82%
     crew_cents:       int   # 15%
-    architect_cents:  int   # 1%
+    architect_cents:  int   # 3%
 
     def as_dict(self) -> dict:
         return {
@@ -69,11 +69,14 @@ class MannaSplit:
 
 def calculate_manna_split(total_cents: int) -> MannaSplit:
     """
-    Split total_cents into 84/15/1.
+    Split total_cents into 82/15/3.
+    Architect: 3% (increased from 1% — Architect's Covenant v2)
+    Crew:      15%
+    Community: 82%
     Rounding: community absorbs any remainder to ensure total is exact.
     """
     crew_cents      = round(total_cents * 0.15)
-    architect_cents = round(total_cents * 0.01)
+    architect_cents = round(total_cents * 0.03)
     community_cents = total_cents - crew_cents - architect_cents
     return MannaSplit(
         total_cents=total_cents,

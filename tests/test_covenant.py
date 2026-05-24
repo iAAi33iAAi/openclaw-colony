@@ -34,23 +34,23 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
 class TestMannaCovenantIntegrity:
 
-    def test_architect_split_is_one_percent(self):
-        """The Architect receives exactly 1% — not 0%, not 2%. Exactly 1%."""
+    def test_architect_split_is_three_percent(self):
+        """The Architect receives exactly 3% — not 1%, not 2%. Exactly 3%."""
         from stripe_bridge import calculate_manna_split
         split = calculate_manna_split(10000)
-        assert split.architect_cents == 100, (
+        assert split.architect_cents == 300, (
             f"COVENANT VIOLATION: Architect split is {split.architect_cents} cents "
-            f"on 10000, expected 100 (1%). "
+            f"on 10000, expected 300 (3%). "
             f"The 1% covenant cannot be modified."
         )
 
-    def test_community_split_is_eighty_four_percent(self):
-        """The Community receives 84%."""
+    def test_community_split_is_eighty_two_percent(self):
+        """The Community receives 82%."""
         from stripe_bridge import calculate_manna_split
         split = calculate_manna_split(10000)
-        assert split.community_cents == 8400, (
+        assert split.community_cents == 8200, (
             f"COVENANT VIOLATION: Community split is {split.community_cents}, "
-            f"expected 8400 (84%)."
+            f"expected 8200 (82%)."
         )
 
     def test_crew_split_is_fifteen_percent(self):
@@ -79,11 +79,11 @@ class TestMannaCovenantIntegrity:
         test_amounts = [100, 1000, 10000, 100000, 1000000]
         for amount in test_amounts:
             split = calculate_manna_split(amount)
-            expected = round(amount * 0.01)
+            expected = round(amount * 0.03)
             # Allow 1 cent rounding tolerance
             assert abs(split.architect_cents - expected) <= 1, (
                 f"COVENANT VIOLATION: At {amount} cents, "
-                f"architect gets {split.architect_cents}, expected ~{expected}."
+                f"architect gets {split.architect_cents}, expected ~{expected} (3%)."
             )
 
     def test_no_zero_architect_split(self):
@@ -341,7 +341,7 @@ class TestProofOfCovenant:
             "timestamp": int(time.time()),
             "covenant": {
                 "lq_threshold": LQ_THRESHOLD,
-                "architect_split_bps": 100,   # basis points = 1%
+                "architect_split_bps": 300,   # basis points = 3%
                 "extraction_pattern_count": len(_EXTRACTION_SIGNATURES),
                 "manna_sum_check": (
                     split.architect_cents +
@@ -362,7 +362,7 @@ class TestProofOfCovenant:
         assert len(signature) == 64
         assert proof_payload["covenant"]["manna_sum_check"] is True
         assert proof_payload["covenant"]["lq_threshold"] == 0.85
-        assert proof_payload["covenant"]["architect_split_bps"] == 100
+        assert proof_payload["covenant"]["architect_split_bps"] == 300
 
         print(f"\n  Proof of Covenant generated successfully.")
         print(f"  Signature: {signature[:32]}...")

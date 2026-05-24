@@ -69,9 +69,9 @@ class TestMannaSplit:
     def test_default_100_cents(self):
         s = calculate_manna_split(100)
         assert s.total_cents == 100
-        assert s.community_cents == 84
+        assert s.community_cents == 82
         assert s.crew_cents == 15
-        assert s.architect_cents == 1
+        assert s.architect_cents == 3
 
     def test_split_sums_to_total(self):
         for total in [100, 200, 500, 1000, 9999, 1]:
@@ -96,7 +96,7 @@ class TestMannaSplit:
     def test_large_amount(self):
         s = calculate_manna_split(1_000_000)
         assert s.community_cents + s.crew_cents + s.architect_cents == 1_000_000
-        assert s.community_cents == pytest.approx(840_000, abs=2)
+        assert s.community_cents == pytest.approx(820_000, abs=2)
 
     def test_as_dict_keys(self):
         s = calculate_manna_split(100)
@@ -105,9 +105,9 @@ class TestMannaSplit:
 
     def test_percentages_approximate(self):
         s = calculate_manna_split(10_000)
-        assert abs(s.community_cents / 10_000 - 0.84) < 0.01
+        assert abs(s.community_cents / 10_000 - 0.82) < 0.01
         assert abs(s.crew_cents      / 10_000 - 0.15) < 0.01
-        assert abs(s.architect_cents / 10_000 - 0.01) < 0.01
+        assert abs(s.architect_cents / 10_000 - 0.03) < 0.01
 
 
 # =============================================================================
@@ -132,9 +132,9 @@ class TestMockPayments:
     def test_process_correct_split(self):
         result = process_manna_payment("task-002", "hash-xyz")
         assert result.split.total_cents == 100
-        assert result.split.community_cents == 84
+        assert result.split.community_cents == 82
         assert result.split.crew_cents == 15
-        assert result.split.architect_cents == 1
+        assert result.split.architect_cents == 3
 
     def test_process_no_error(self):
         result = process_manna_payment("task-003", "hash-def")
@@ -305,9 +305,9 @@ class TestPaymentPersistence:
         db.commit()
         row = db.query(PaymentRecord).filter_by(task_id="pay-t1").first()
         assert row is not None
-        assert row.community_cents == 84
+        assert row.community_cents == 82
         assert row.crew_cents == 15
-        assert row.architect_cents == 1
+        assert row.architect_cents == 3
 
     def test_payment_status_default_pending(self, db):
         rec = PaymentRecord(
