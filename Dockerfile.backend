@@ -35,7 +35,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend/ .
 
 # ── Data directory for SQLite lineage chain ───────────────────
-RUN mkdir -p /data /logs
+RUN mkdir -p /data /logs && \
+    ln -sf /app/love-quality /app/love_quality && \
+    ln -sf /app/colony-agents /app/colony_agents && \
+    ln -sf /app/aethel-kernel /app/aethel_kernel_src
 
 # ── Health check script ───────────────────────────────────────
 RUN echo '#!/bin/sh\ncurl -sf http://localhost:8000/health || exit 1' > /healthcheck.sh && \
@@ -44,4 +47,4 @@ RUN echo '#!/bin/sh\ncurl -sf http://localhost:8000/health || exit 1' > /healthc
 EXPOSE 8000
 
 # Genesis runs first, then the server starts
-CMD ["sh", "-c", "python dev_commit_init.py && uvicorn colony-agents.orchestrator.colony_coordinator_v2:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"
+CMD ["sh", "-c", "python dev_commit_init.py && uvicorn colony_agents.orchestrator.colony_coordinator_v2:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
