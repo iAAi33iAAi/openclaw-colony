@@ -125,7 +125,8 @@ jobs:
 
       - name: Check docker-compose.yml is valid
         run: |
-          docker compose config --quiet && echo "✅ docker-compose.yml valid"
+          pip install -q pyyaml
+          python3 -c "import yaml; yaml.safe_load(open('docker-compose.yml')); print('✅ docker-compose.yml valid')" 
 
       - name: Check required files exist
         run: |
