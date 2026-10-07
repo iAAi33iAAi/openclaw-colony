@@ -34,23 +34,23 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
 
 class TestMannaCovenantIntegrity:
 
-    def test_architect_split_is_three_percent(self):
-        """The Architect receives exactly 3% — not 1%, not 2%. Exactly 3%."""
+    def test_architect_split_is_one_percent(self):
+        """The Architect receives exactly 1% as required by the binding covenant."""
         from stripe_bridge import calculate_manna_split
         split = calculate_manna_split(10000)
-        assert split.architect_cents == 300, (
+        assert split.architect_cents == 100, (
             f"COVENANT VIOLATION: Architect split is {split.architect_cents} cents "
-            f"on 10000, expected 300 (3%). "
+            f"on 10000, expected 100 (1%). "
             f"The 1% covenant cannot be modified."
         )
 
-    def test_community_split_is_eighty_two_percent(self):
-        """The Community receives 82%."""
+    def test_community_split_is_eighty_four_percent(self):
+        """The Community receives 84%."""
         from stripe_bridge import calculate_manna_split
         split = calculate_manna_split(10000)
-        assert split.community_cents == 8200, (
+        assert split.community_cents == 8400, (
             f"COVENANT VIOLATION: Community split is {split.community_cents}, "
-            f"expected 8200 (82%)."
+            f"expected 8400 (84%)."
         )
 
     def test_crew_split_is_fifteen_percent(self):
