@@ -79,11 +79,11 @@ class TestMannaCovenantIntegrity:
         test_amounts = [100, 1000, 10000, 100000, 1000000]
         for amount in test_amounts:
             split = calculate_manna_split(amount)
-            expected = round(amount * 0.03)
+            expected = round(amount * 0.01)
             # Allow 1 cent rounding tolerance
             assert abs(split.architect_cents - expected) <= 1, (
                 f"COVENANT VIOLATION: At {amount} cents, "
-                f"architect gets {split.architect_cents}, expected ~{expected} (3%)."
+                f"architect gets {split.architect_cents}, expected ~{expected} (1%)."
             )
 
     def test_no_zero_architect_split(self):
