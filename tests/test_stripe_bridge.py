@@ -307,7 +307,7 @@ class TestPaymentPersistence:
         assert row is not None
         assert row.community_cents == 84
         assert row.crew_cents == 15
-        assert row.architect_cents == 3
+        assert row.architect_cents == 1
 
     def test_payment_status_default_pending(self, db):
         rec = PaymentRecord(
