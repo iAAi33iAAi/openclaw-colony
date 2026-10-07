@@ -71,7 +71,7 @@ class TestMannaSplit:
         assert s.total_cents == 100
         assert s.community_cents == 84
         assert s.crew_cents == 15
-        assert s.architect_cents == 3
+        assert s.architect_cents == 1
 
     def test_split_sums_to_total(self):
         for total in [100, 200, 500, 1000, 9999, 1]:
@@ -107,7 +107,7 @@ class TestMannaSplit:
         s = calculate_manna_split(10_000)
         assert abs(s.community_cents / 10_000 - 0.84) < 0.01
         assert abs(s.crew_cents      / 10_000 - 0.15) < 0.01
-        assert abs(s.architect_cents / 10_000 - 0.03) < 0.01
+        assert abs(s.architect_cents / 10_000 - 0.01) < 0.01
 
 
 # =============================================================================
@@ -134,7 +134,7 @@ class TestMockPayments:
         assert result.split.total_cents == 100
         assert result.split.community_cents == 84
         assert result.split.crew_cents == 15
-        assert result.split.architect_cents == 3
+        assert result.split.architect_cents == 1
 
     def test_process_no_error(self):
         result = process_manna_payment("task-003", "hash-def")
@@ -305,7 +305,7 @@ class TestPaymentPersistence:
         db.commit()
         row = db.query(PaymentRecord).filter_by(task_id="pay-t1").first()
         assert row is not None
-        assert row.community_cents == 82
+        assert row.community_cents == 84
         assert row.crew_cents == 15
         assert row.architect_cents == 3
 
