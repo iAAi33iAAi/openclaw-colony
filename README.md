@@ -197,9 +197,9 @@ Nodes discover each other, gossip lineage tips, and run cross-node governance pr
 Every approved transaction triggers an automatic value split:
 
 ```
-82% → Community Pool
+84% → Community Pool
 15% → Crew (contributors)
- 3% → Architect (human_001 — forever, mathematically enforced)
+ 1% → Architect (human_001 — forever, mathematically enforced)
 ```
 
 Connect Stripe for live payments via `STRIPE_SECRET_KEY`. Without it, runs in mock mode.
