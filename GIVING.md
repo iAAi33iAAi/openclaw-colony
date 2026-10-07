@@ -25,7 +25,7 @@ Given to any person who is brave enough to pool their life with others.
 
 The MANNA split is 84 / 15 / 1.
 
-82% to the community pool.
+84% to the community pool.
 15% to the crew who did the work.
 1% to the architect.
 
