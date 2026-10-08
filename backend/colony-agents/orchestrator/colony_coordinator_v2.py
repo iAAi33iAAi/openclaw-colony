@@ -566,6 +566,22 @@ async def admin_payments(
     ]
 
 
+@app.get("/admin/integrations")
+@limiter.limit(RATE_ADMIN)
+async def admin_integrations(
+    request: Request,
+    _: None = Depends(require_admin),
+):
+    """Return the authoritative map of what is runtime-connected."""
+    from integration_registry import list_integrations, local_capabilities
+
+    return {
+        "integrations": list_integrations(),
+        "local_capabilities": local_capabilities(),
+        "note": "Connected means executable in this deployment. Planned means a separate service/API boundary is still required.",
+    }
+
+
 @app.get("/admin/manna/config")
 @limiter.limit(RATE_ADMIN)
 async def admin_manna_config(
