@@ -753,10 +753,11 @@ async def admin_integrations(
     _: None = Depends(require_admin),
 ):
     """Return the authoritative map of what is runtime-connected."""
-    from integration_registry import list_integrations, local_capabilities
+    from integration_registry import local_capabilities
+    from integration_status import runtime_integrations
 
     return {
-        "integrations": list_integrations(),
+        "integrations": runtime_integrations(),
         "local_capabilities": local_capabilities(),
         "note": "Connected means executable in this deployment. Planned means a separate service/API boundary is still required.",
     }
