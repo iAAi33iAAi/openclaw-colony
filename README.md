@@ -34,7 +34,7 @@ npm run dev
 ```
 Then open `http://localhost:3000` and use **Settings** to add a Colony API key/admin key when authentication is enabled.
 
-Production Docker deployment serves the frontend and proxies the platform API through the same origin, so the browser does not need a hard-coded backend address.
+Docker deployment configuration can serve the frontend and proxy the platform API through the same origin, so the browser does not need a hard-coded backend address. This documents deployable configuration, not evidence of an externally operating production deployment.
 
 ### Optional CAIOS / Project Andrew runtime
 The platform can call CAIOS as an advisory reasoning engine through `CAIOS_SOURCE_PATH`. Keep the external GPL-3.0 repository in its own checkout and preserve its `LICENSE.txt` and attribution. CAIOS results never authorize an action; the Colony AETHEL safety pipeline remains the execution gate.
@@ -54,7 +54,7 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Verify your node is live:
+Verify your local development node is running:
 ```bash
 curl http://localhost:8000/health
 # {"status": "healthy", "node_id": "node-001-bethel"}
@@ -74,7 +74,7 @@ curl http://localhost:8000/health
 │                    │  Rust Safety Kernel      │      │
 │                    │  (PyO3 native module)    │      │
 │                    │                          │      │
-│                    │  Gate 0: Biometric HMAC/accountability validation  │      │
+│                    │  Gates 1-3: Human consent, LQ, extraction scan     │      │
 │                    │  Gate 1: Human consent   │      │
 │                    │  Gate 2: LQ score ≥ 0.85 │      │
 │                    │  Gate 3: 27-pattern scan │      │
@@ -132,7 +132,7 @@ openclaw-colony/
 │   ├── adr/                        # Architecture Decision Records
 │   └── specs/                      # Protocol + telemetry specs
 ├── install.sh                      # One-command node installer
-├── docker-compose.yml              # Production deployment
+├── docker-compose.yml              # Docker deployment configuration
 ├── MISSION.md                      # The non-negotiable core
 ├── GIVING.md                       # The covenant
 ├── ESSAY.md                        # Full public essay
