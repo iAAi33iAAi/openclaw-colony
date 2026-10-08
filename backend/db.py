@@ -188,38 +188,38 @@ def append_lineage(
 ) -> str:
     """Append a lineage link under a SQLite write lock.
 
-    SQLite's BEGIN IMMEDIATE serializes competing writers before the previous
-    tip is read, preventing two workers from deriving the same predecessor.
+    The caller's session is reused so the lock does not compete with another
+    connection. Any preceding reads are explicitly rolled back before the
+    immediate write transaction begins.
     """
+    db.rollback()
     prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
+    db.connection().exec_driver_sql("BEGIN IMMEDIATE")
+    try:
+        row = db.execute(
+            select(LineageRecord.lineage_hash)
+            .order_by(LineageRecord.id.desc())
+            .limit(1)
+        ).first()
+        prev = row[0] if row else "GENESIS"
 
-    with engine.connect() as conn:
-        conn.exec_driver_sql("BEGIN IMMEDIATE")
-        try:
-            row = conn.execute(
-                select(LineageRecord.lineage_hash)
-                .order_by(LineageRecord.id.desc())
-                .limit(1)
-            ).first()
-            prev = row[0] if row else "GENESIS"
+        payload = f"{prev}:{task_id}:{committed_action}"
+        new_hash = hashlib.sha256(payload.encode()).hexdigest()
 
-            payload = f"{prev}:{task_id}:{committed_action}"
-            new_hash = hashlib.sha256(payload.encode()).hexdigest()
-
-            conn.execute(
-                insert(LineageRecord).values(
-                    task_id=task_id,
-                    prompt_hash=prompt_hash,
-                    lq_composite=lq_composite,
-                    lineage_hash=new_hash,
-                    prev_hash=prev,
-                )
+        db.execute(
+            insert(LineageRecord).values(
+                task_id=task_id,
+                prompt_hash=prompt_hash,
+                lq_composite=lq_composite,
+                lineage_hash=new_hash,
+                prev_hash=prev,
             )
-            conn.commit()
-            return new_hash
-        except Exception:
-            conn.rollback()
-            raise
+        )
+        db.commit()
+        return new_hash
+    except Exception:
+        db.rollback()
+        raise
 
 
 def create_api_key(db: Session, label: str = "", stripe_account_id: str = "") -> dict:
