@@ -1,5 +1,4 @@
 # OpenClaw Colony — CI Pipeline
-# Runs on every push to main
 # Builds Rust kernel, runs 728 tests, verifies covenant
 
 name: Colony CI
@@ -22,7 +21,7 @@ env:
 jobs:
 
   test:
-    name: "Build Kernel + Run 728 Tests"
+    name: "Build Kernel + Run Full Test Suite"
     runs-on: ubuntu-latest
 
     steps:
