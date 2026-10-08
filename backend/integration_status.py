@@ -8,6 +8,7 @@ blocked. Probes are read-only and never call /aethel/evaluate.
 from __future__ import annotations
 
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Any
 
@@ -154,9 +155,26 @@ def runtime_integrations() -> list[dict[str, Any]]:
     from integration_registry import list_integrations
 
     items = list_integrations()
+    probes: dict[int, dict[str, Any]] = {}
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(items)))) as pool:
+        futures = {
+            pool.submit(probe_integration, item): index
+            for index, item in enumerate(items)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                probes[index] = future.result()
+            except Exception as exc:
+                probes[index] = {
+                    "status": "ERROR",
+                    "checked_at": _now(),
+                    "detail": f"Runtime probe failed unexpectedly: {exc}",
+                }
+
     output: list[dict[str, Any]] = []
-    for item in items:
-        probe = probe_integration(item)
+    for index, item in enumerate(items):
+        probe = probes[index]
         enriched = {
             **item,
             "declared_status": item.get("status"),
