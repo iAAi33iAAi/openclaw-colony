@@ -6,6 +6,7 @@ Drop-in replacement for colony_coordinator.py
 
 import asyncio
 import json
+import hashlib
 import logging
 import os
 import uuid
@@ -28,7 +29,7 @@ from colony_agents.innovation_agent  import InnovationAgent
 # ── New infrastructure ────────────────────────────────────────────────────────
 from db import (
     init_db, get_db, append_lineage,
-    create_api_key, PaymentRecord, TaskRecord, SessionLocal,
+    create_api_key, PaymentRecord, TaskRecord, ApprovalRecord, SessionLocal,
 )
 from auth import get_current_key, require_admin
 from rate_limit import limiter, RATE_PROCESS, RATE_ADMIN, RATE_WEBHOOK
@@ -75,6 +76,7 @@ class ColonyResult:
     committed_action: Optional[str]
     lineage_hash:     Optional[str]
     payment:          Optional[dict]
+    approval_status:  Optional[str] = None
     timestamp:        str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
@@ -108,7 +110,7 @@ class ColonyCoordinator:
         log.info("[STRIPE] Mock mode: %s", MOCK_MODE)
         log.info("[FEDERATION] Node ID: %s  Peers: %d", NODE_ID, len(PEER_URLS))
 
-    async def process(self, task: ColonyTask) -> ColonyResult:
+    async def process(self, task: ColonyTask, *, approval_override: bool = False) -> ColonyResult:
         log.info("Processing task %s: %r", task.task_id, task.prompt[:80])
 
         # 1 — Parallel agent evaluation
@@ -160,6 +162,40 @@ class ColonyCoordinator:
         committed_action = None
         lineage_hash     = None
         payment_info     = None
+
+        approval_status = None
+        approval_required = os.getenv("COLONY_APPROVAL_REQUIRED", "false").lower() == "true"
+        if aethel_result["verdict"] == "APPROVED" and approval_required and not approval_override:
+            db = SessionLocal()
+            try:
+                db.add(ApprovalRecord(
+                    task_id=task.task_id,
+                    prompt=task.prompt,
+                    action_type=task.action_type,
+                    human_consent=task.human_consent,
+                    biometric_token_json=json.dumps(task.biometric_token) if task.biometric_token else None,
+                    agent_outputs_json=json.dumps(agent_outputs, default=str, sort_keys=True),
+                    lq_json=json.dumps(asdict(lq), default=str, sort_keys=True),
+                    status="PENDING",
+                    reason="Awaiting explicit human approval",
+                ))
+                db.add(TaskRecord(
+                    task_id=task.task_id,
+                    prompt_hash=hashlib.sha256(task.prompt.encode()).hexdigest(),
+                    action_type=task.action_type,
+                    human_consent=task.human_consent,
+                    lq_composite=lq.composite,
+                    status="PENDING_APPROVAL",
+                    reason="Awaiting explicit human approval",
+                    submitted_at=datetime.fromisoformat(task.submitted_at),
+                    completed_at=datetime.now(timezone.utc),
+                ))
+                db.commit()
+            finally:
+                db.close()
+            return ColonyResult(task_id=task.task_id, prompt=task.prompt, agent_outputs=agent_outputs,
+                lq_score=asdict(lq), aethel_verdict="PENDING_APPROVAL", aethel_gates=aethel_result["gates"],
+                committed_action=None, lineage_hash=None, payment=None, approval_status="PENDING")
 
         if aethel_result["verdict"] == "APPROVED":
             committed_action = self._build_action(task, agent_outputs, lq)
@@ -250,6 +286,7 @@ class ColonyCoordinator:
             committed_action=committed_action,
             lineage_hash=lineage_hash,
             payment=payment_info,
+            approval_status=approval_status,
         )
 
     # ── Helpers ───────────────────────────────────────────────────────────────
@@ -349,6 +386,11 @@ class IntegrationEvaluateRequest(BaseModel):
     payload: dict = {}
 
 
+class ApprovalDecisionRequest(BaseModel):
+    decision: str
+    reason: str = ""
+
+
 class TaskResponse(BaseModel):
     task_id:          str
     prompt:           str
@@ -360,6 +402,7 @@ class TaskResponse(BaseModel):
     lineage_hash:     Optional[str]
     payment:          Optional[dict]
     timestamp:        str
+    approval_status:  Optional[str] = None
 
 
 class CreateKeyRequest(BaseModel):
@@ -403,7 +446,66 @@ async def process_task(
         lineage_hash=result.lineage_hash,
         payment=result.payment,
         timestamp=result.timestamp,
+        approval_status=result.approval_status,
     )
+
+
+# ── Durable approval queue ───────────────────────────────────────────────────
+
+@app.get("/admin/approvals")
+@limiter.limit(RATE_ADMIN)
+async def admin_list_approvals(request: Request, _: None = Depends(require_admin), db: Session = Depends(get_db)):
+    rows = db.query(ApprovalRecord).order_by(ApprovalRecord.id.desc()).limit(100).all()
+    return [{"task_id": r.task_id, "action_type": r.action_type, "status": r.status, "reason": r.reason,
+             "created_at": r.created_at.isoformat() if r.created_at else None,
+             "decided_at": r.decided_at.isoformat() if r.decided_at else None,
+             "decided_by": r.decided_by} for r in rows]
+
+
+@app.post("/admin/approvals/{task_id}")
+@limiter.limit(RATE_ADMIN)
+async def admin_decide_approval(task_id: str, req: ApprovalDecisionRequest, request: Request,
+                                _: None = Depends(require_admin), db: Session = Depends(get_db)):
+    decision = req.decision.upper().strip()
+    if decision not in {"APPROVE", "REJECT"}:
+        raise HTTPException(status_code=400, detail="decision must be APPROVE or REJECT")
+    row = db.query(ApprovalRecord).filter_by(task_id=task_id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="approval not found")
+    if row.status != "PENDING":
+        raise HTTPException(status_code=409, detail=f"approval already {row.status}")
+    now = datetime.now(timezone.utc)
+    row.status = "APPROVED" if decision == "APPROVE" else "REJECTED"
+    row.reason = req.reason or ("Explicit human approval granted" if decision == "APPROVE" else "Explicit human approval rejected")
+    row.decided_at = now
+    row.decided_by = "admin"
+    task_row = db.query(TaskRecord).filter_by(task_id=task_id).first()
+    if task_row:
+        task_row.status = "APPROVAL_APPROVED" if decision == "APPROVE" else "REJECTED"
+        task_row.reason = row.reason
+        task_row.completed_at = now
+    db.commit()
+    if decision == "REJECT":
+        return {"task_id": task_id, "status": "REJECTED"}
+    task = ColonyTask(task_id=row.task_id, prompt=row.prompt, human_consent=row.human_consent,
+        biometric_token=json.loads(row.biometric_token_json) if row.biometric_token_json else None,
+        action_type=row.action_type)
+    agent_outputs = json.loads(row.agent_outputs_json)
+    lq_data = json.loads(row.lq_json)
+    lq = type("StoredLQ", (), {"composite": float(lq_data["composite"])})()
+    committed_action = coordinator._build_action(task, agent_outputs, lq)
+    lineage_hash = append_lineage(db, task_id, task.prompt, lq.composite, committed_action)
+    payment = process_manna_payment(task_id, lineage_hash)
+    db.add(PaymentRecord(task_id=task_id, lineage_hash=lineage_hash, stripe_transfer_id=payment.community_id,
+        amount_total_cents=payment.split.total_cents, community_cents=payment.split.community_cents,
+        crew_cents=payment.split.crew_cents, architect_cents=payment.split.architect_cents,
+        status=payment.status, stripe_error=payment.error))
+    if task_row:
+        task_row.status = "APPROVED"
+        task_row.lineage_hash = lineage_hash
+        task_row.completed_at = now
+    db.commit()
+    return {"task_id": task_id, "status": "APPROVED", "lineage_hash": lineage_hash, "payment": payment.as_dict()}
 
 
 # ── Health ────────────────────────────────────────────────────────────────────

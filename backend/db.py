@@ -75,6 +75,25 @@ class TaskRecord(Base):
     submitted_at    = Column(DateTime, nullable=False)
     completed_at    = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+
+class ApprovalRecord(Base):
+    """Durable human approval queue for safety-approved actions."""
+    __tablename__ = "approvals"
+
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(String(36), unique=True, nullable=False, index=True)
+    prompt = Column(Text, nullable=False)
+    action_type = Column(String(64), nullable=False, default="proposal")
+    human_consent = Column(Boolean, nullable=False, default=False)
+    biometric_token_json = Column(Text, nullable=True)
+    agent_outputs_json = Column(Text, nullable=False)
+    lq_json = Column(Text, nullable=False)
+    status = Column(String(32), nullable=False, default="PENDING")
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    decided_at = Column(DateTime, nullable=True)
+    decided_by = Column(String(128), nullable=True)
+
 class LineageRecord(Base):
     """Persistent SHA-256 hash chain — one row per APPROVED task."""
     __tablename__ = "lineage"

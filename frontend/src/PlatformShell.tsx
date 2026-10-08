@@ -128,6 +128,16 @@ interface DuressEvent {
   escrow_until: string;
 }
 
+interface ApprovalRecord {
+  task_id: string;
+  action_type: string;
+  status: string;
+  reason: string | null;
+  created_at: string | null;
+  decided_at: string | null;
+  decided_by: string | null;
+}
+
 interface Integration {
   key: string;
   name: string;
@@ -177,6 +187,7 @@ export default function PlatformShell() {
   const [members, setMembers] = useState<Member[]>([]);
   const [duress, setDuress] = useState<DuressEvent[]>([]);
   const [integrations, setIntegrations] = useState<Integration[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [adminError, setAdminError] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
 
@@ -207,9 +218,10 @@ export default function PlatformShell() {
       apiFetch<{ members: Member[] }>("/biometric/members", {}, "admin"),
       apiFetch<{ events: DuressEvent[] }>("/biometric/duress", {}, "admin"),
       apiFetch<{ integrations: Integration[] }>("/admin/integrations", {}, "admin"),
+      apiFetch<ApprovalRecord[]>("/admin/approvals", {}, "admin"),
     ]);
 
-    const [tasksResult, lineageResult, paymentsResult, mannaResult, federationResult, nodesResult, membersResult, duressResult, integrationsResult] = calls;
+    const [tasksResult, lineageResult, paymentsResult, mannaResult, federationResult, nodesResult, membersResult, duressResult, integrationsResult, approvalsResult] = calls;
 
     if (tasksResult.status === "fulfilled") setTasks(tasksResult.value);
     if (lineageResult.status === "fulfilled") setLineage(lineageResult.value);
@@ -220,6 +232,7 @@ export default function PlatformShell() {
     if (membersResult.status === "fulfilled") setMembers(membersResult.value.members ?? []);
     if (duressResult.status === "fulfilled") setDuress(duressResult.value.events ?? []);
     if (integrationsResult.status === "fulfilled") setIntegrations(integrationsResult.value.integrations ?? []);
+    if (approvalsResult.status === "fulfilled") setApprovals(approvalsResult.value);
 
     const firstRejected = calls.find((call) => call.status === "rejected");
     if (firstRejected && firstRejected.status === "rejected") {
@@ -312,7 +325,7 @@ export default function PlatformShell() {
           </section>
         )}
         {page === "agents" && <AgentsPage onCreateRequest={() => setPage("requests")} />}
-        {page === "approvals" && <ApprovalsPage onCreateRequest={() => setPage("requests")} />}
+        {page === "approvals" && <ApprovalsPage approvals={approvals} hasAdminKey={hasAdminKey} onSettings={() => setPage("settings")} onRefresh={() => setReloadTick((value) => value + 1)} onCreateRequest={() => setPage("requests")} />}
         {page === "history" && <HistoryPage records={tasks} hasAdminKey={hasAdminKey} onSettings={() => setPage("settings")} />}
         {page === "economics" && <EconomicsPage payments={payments} manna={manna} hasAdminKey={hasAdminKey} onSettings={() => setPage("settings")} />}
         {page === "network" && <NetworkPage federation={federation} nodes={nodes} hasAdminKey={hasAdminKey} onSettings={() => setPage("settings")} />}
@@ -373,8 +386,14 @@ function AgentsPage({ onCreateRequest }: { onCreateRequest: () => void }) {
   return <section className="page-section"><div className="section-intro"><div><div className="section-kicker">AI WORKFORCE</div><h2>The seven-agent team</h2><p>The current request engine evaluates work through seven specialist agents. The next hardening step is to attach explicit permissions and work history to each one.</p></div><button className="primary-button" type="button" onClick={onCreateRequest}>Create request</button></div><div className="agent-catalog">{AGENTS.map((agent, index) => <div className="agent-catalog-card" key={agent.name}><div className="agent-number">0{index + 1}</div><h3>{agent.name}</h3><p>{agent.role}</p><div className="agent-status"><span className="status-dot online" /> Present in live request flow</div></div>)}</div></section>;
 }
 
-function ApprovalsPage({ onCreateRequest }: { onCreateRequest: () => void }) {
-  return <section className="empty-state-panel"><div className="empty-state-icon">✓</div><div className="section-kicker">HUMAN AUTHORITY</div><h2>The approval queue is a separate workflow that still needs to be implemented.</h2><p>The current API carries a human-consent value and enforces it during request evaluation, but it does not yet store a durable waiting-for-approval queue. This page deliberately does not pretend otherwise.</p><button className="primary-button" type="button" onClick={onCreateRequest}>Open the live request flow</button></section>;
+function ApprovalsPage({ approvals, hasAdminKey, onSettings, onRefresh, onCreateRequest }: { approvals: ApprovalRecord[]; hasAdminKey: boolean; onSettings: () => void; onRefresh: () => void; onCreateRequest: () => void }) {
+  if (!hasAdminKey) return <ProtectedPage title="Approvals" description="Connect an admin key to inspect and decide pending human approvals." onSettings={onSettings} />;
+  const pending = approvals.filter((item) => item.status === "PENDING");
+  const decide = async (taskId: string, decision: "APPROVE" | "REJECT") => {
+    await apiFetch("/admin/approvals/" + encodeURIComponent(taskId), { method: "POST", body: JSON.stringify({ decision }) }, "admin");
+    onRefresh();
+  };
+  return <section className="page-section"><div className="section-intro"><div><div className="section-kicker">HUMAN AUTHORITY</div><h2>Durable approval queue</h2><p>Safety-approved actions can now wait here for an explicit operator decision before lineage and MANNA execution.</p></div><span className="info-pill">{pending.length} pending</span></div><div className="table-card"><table><thead><tr><th>Task</th><th>Action</th><th>Status</th><th>Created</th><th>Decision</th></tr></thead><tbody>{approvals.map((item) => <tr key={item.task_id}><td><code>{item.task_id.slice(0, 12)}</code></td><td>{item.action_type}</td><td><StatusBadge value={item.status} /></td><td>{formatDate(item.created_at)}</td><td>{item.status === "PENDING" ? <div className="settings-actions"><button className="primary-button" type="button" onClick={() => void decide(item.task_id, "APPROVE")}>Approve</button><button className="secondary-button" type="button" onClick={() => void decide(item.task_id, "REJECT")}>Reject</button></div> : item.decided_by ?? "—"}</td></tr>)}{!approvals.length && <tr><td colSpan={5}><EmptyTable text="No approval records are currently stored." /></td></tr>}</tbody></table></div><button className="secondary-button" type="button" onClick={onCreateRequest}>Open request flow</button></section>;
 }
 
 function HistoryPage({ records, hasAdminKey, onSettings }: { records: TaskRecord[]; hasAdminKey: boolean; onSettings: () => void }) {
