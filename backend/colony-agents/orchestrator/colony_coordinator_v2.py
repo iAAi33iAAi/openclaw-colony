@@ -308,6 +308,7 @@ class TaskRequest(BaseModel):
 class TaskResponse(BaseModel):
     task_id:          str
     prompt:           str
+    agent_outputs:    dict
     lq_score:         dict
     aethel_verdict:   str
     aethel_gates:     dict
@@ -350,6 +351,7 @@ async def process_task(
     return TaskResponse(
         task_id=result.task_id,
         prompt=result.prompt,
+        agent_outputs=result.agent_outputs,
         lq_score=result.lq_score,
         aethel_verdict=result.aethel_verdict,
         aethel_gates=result.aethel_gates,
