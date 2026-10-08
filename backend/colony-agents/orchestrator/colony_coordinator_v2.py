@@ -40,6 +40,8 @@ from federation import (
 from federation_routes import router as federation_router
 from biometric import init_biometric_tables, record_accountability
 from biometric_routes import router as biometric_router
+from caios_adapter import CAIOSAdapter
+from integration_gateway import capabilities as integration_capabilities, evaluate as integration_evaluate, health as integration_health
 
 logging.basicConfig(
     level=logging.INFO,
@@ -111,6 +113,16 @@ class ColonyCoordinator:
 
         # 1 — Parallel agent evaluation
         agent_outputs = await self._run_agents(task)
+
+        # Optional CAIOS advisory pass. It contributes analysis only; the local
+        # AETHEL kernel remains the sole execution authority.
+        if os.getenv("CAIOS_ADVISORY_ENABLED", "false").lower() == "true":
+            caios_result = await asyncio.to_thread(
+                CAIOSAdapter().evaluate,
+                task.prompt,
+            )
+            agent_outputs["CAIOS"] = caios_result
+            log.info("[CAIOS] Advisory status=%s", caios_result.get("status"))
 
         # 2 — Love Quality scoring
         lq: LQScore = self.lq_engine.score(task.prompt, agent_outputs)
@@ -326,6 +338,15 @@ class TaskRequest(BaseModel):
     human_consent:    bool = True
     biometric_token:  Optional[dict] = None   # Gate 0 attestation token
     action_type:      str  = "proposal"
+
+
+class CAIOSEvaluateRequest(BaseModel):
+    prompt: str
+
+
+class IntegrationEvaluateRequest(BaseModel):
+    operation: str
+    payload: dict = {}
 
 
 class TaskResponse(BaseModel):
@@ -677,3 +698,65 @@ if __name__ == "__main__":
         port=8000,
         reload=False,
     )
+
+@app.get("/admin/integrations/{integration_key}/health")
+@limiter.limit(RATE_ADMIN)
+async def integration_health_route(
+    integration_key: str,
+    request: Request,
+    _: Any = Depends(require_admin),
+):
+    try:
+        return integration_health(integration_key)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/admin/integrations/{integration_key}/capabilities")
+@limiter.limit(RATE_ADMIN)
+async def integration_capabilities_route(
+    integration_key: str,
+    request: Request,
+    _: Any = Depends(require_admin),
+):
+    try:
+        return integration_capabilities(integration_key)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/admin/integrations/{integration_key}/evaluate")
+@limiter.limit(RATE_ADMIN)
+async def integration_evaluate_route(
+    integration_key: str,
+    request: Request,
+    req: IntegrationEvaluateRequest,
+    _: Any = Depends(require_admin),
+):
+    try:
+        return integration_evaluate(
+            integration_key,
+            request_id=str(uuid.uuid4()),
+            operation=req.operation,
+            payload=req.payload,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/admin/caios")
+@limiter.limit(RATE_ADMIN)
+async def caios_status(request: Request, _: Any = Depends(require_admin)):
+    """Report whether an external CAIOS Project Andrew checkout is configured."""
+    return CAIOSAdapter().status()
+
+
+@app.post("/admin/caios/evaluate")
+@limiter.limit(RATE_ADMIN)
+async def caios_evaluate(
+    request: Request,
+    req: CAIOSEvaluateRequest,
+    _: Any = Depends(require_admin),
+):
+    """Run CAIOS as an advisory evaluator; this endpoint never authorizes execution."""
+    return CAIOSAdapter().evaluate(req.prompt)
