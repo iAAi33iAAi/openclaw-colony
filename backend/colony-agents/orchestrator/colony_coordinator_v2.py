@@ -464,48 +464,177 @@ async def admin_list_approvals(request: Request, _: None = Depends(require_admin
 
 @app.post("/admin/approvals/{task_id}")
 @limiter.limit(RATE_ADMIN)
-async def admin_decide_approval(task_id: str, req: ApprovalDecisionRequest, request: Request,
-                                _: None = Depends(require_admin), db: Session = Depends(get_db)):
+async def admin_decide_approval(
+    task_id: str,
+    req: ApprovalDecisionRequest,
+    request: Request,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Atomically claim a pending approval before any side effect occurs."""
     decision = req.decision.upper().strip()
     if decision not in {"APPROVE", "REJECT"}:
         raise HTTPException(status_code=400, detail="decision must be APPROVE or REJECT")
-    row = db.query(ApprovalRecord).filter_by(task_id=task_id).first()
-    if not row:
-        raise HTTPException(status_code=404, detail="approval not found")
-    if row.status != "PENDING":
+
+    claimed = (
+        db.query(ApprovalRecord)
+        .filter(
+            ApprovalRecord.task_id == task_id,
+            ApprovalRecord.status == "PENDING",
+        )
+        .update(
+            {ApprovalRecord.status: "PROCESSING", ApprovalRecord.decided_by: "admin"},
+            synchronize_session=False,
+        )
+    )
+    db.commit()
+    if claimed != 1:
+        row = db.query(ApprovalRecord).filter_by(task_id=task_id).first()
+        if not row:
+            raise HTTPException(status_code=404, detail="approval not found")
         raise HTTPException(status_code=409, detail=f"approval already {row.status}")
+
+    row = db.query(ApprovalRecord).filter_by(task_id=task_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="approval not found")
+
     now = datetime.now(timezone.utc)
-    row.status = "APPROVED" if decision == "APPROVE" else "REJECTED"
-    row.reason = req.reason or ("Explicit human approval granted" if decision == "APPROVE" else "Explicit human approval rejected")
-    row.decided_at = now
-    row.decided_by = "admin"
+    reason = req.reason or (
+        "Explicit human approval granted"
+        if decision == "APPROVE"
+        else "Explicit human approval rejected"
+    )
+
     task_row = db.query(TaskRecord).filter_by(task_id=task_id).first()
-    if task_row:
-        task_row.status = "APPROVAL_APPROVED" if decision == "APPROVE" else "REJECTED"
-        task_row.reason = row.reason
-        task_row.completed_at = now
-    db.commit()
+
     if decision == "REJECT":
+        row.status = "REJECTED"
+        row.reason = reason
+        row.decided_at = now
+        if task_row:
+            task_row.status = "REJECTED"
+            task_row.reason = reason
+            task_row.completed_at = now
+        db.commit()
         return {"task_id": task_id, "status": "REJECTED"}
-    task = ColonyTask(task_id=row.task_id, prompt=row.prompt, human_consent=row.human_consent,
-        biometric_token=json.loads(row.biometric_token_json) if row.biometric_token_json else None,
-        action_type=row.action_type)
-    agent_outputs = json.loads(row.agent_outputs_json)
-    lq_data = json.loads(row.lq_json)
-    lq = type("StoredLQ", (), {"composite": float(lq_data["composite"])})()
-    committed_action = coordinator._build_action(task, agent_outputs, lq)
-    lineage_hash = append_lineage(db, task_id, task.prompt, lq.composite, committed_action)
-    payment = process_manna_payment(task_id, lineage_hash)
-    db.add(PaymentRecord(task_id=task_id, lineage_hash=lineage_hash, stripe_transfer_id=payment.community_id,
-        amount_total_cents=payment.split.total_cents, community_cents=payment.split.community_cents,
-        crew_cents=payment.split.crew_cents, architect_cents=payment.split.architect_cents,
-        status=payment.status, stripe_error=payment.error))
-    if task_row:
-        task_row.status = "APPROVED"
-        task_row.lineage_hash = lineage_hash
-        task_row.completed_at = now
-    db.commit()
-    return {"task_id": task_id, "status": "APPROVED", "lineage_hash": lineage_hash, "payment": payment.as_dict()}
+
+    existing_lineage = db.query(LineageRecord).filter_by(task_id=task_id).first()
+    existing_payment = db.query(PaymentRecordModel).filter_by(task_id=task_id).first()
+
+    if existing_lineage and existing_payment:
+        row.status = "APPROVED"
+        row.reason = "Already executed; approval request was idempotently reconciled."
+        row.decided_at = now
+        if task_row:
+            task_row.status = "APPROVED"
+            task_row.lineage_hash = existing_lineage.lineage_hash
+            task_row.completed_at = now
+        db.commit()
+        return {
+            "task_id": task_id,
+            "status": "APPROVED",
+            "lineage_hash": existing_lineage.lineage_hash,
+            "payment": {
+                "status": existing_payment.status,
+                "stripe_transfer_id": existing_payment.stripe_transfer_id,
+            },
+            "idempotent": True,
+        }
+
+    if existing_lineage and not existing_payment:
+        row.status = "EXECUTION_REQUIRES_RECONCILIATION"
+        row.reason = (
+            "Lineage already exists but payment state is missing. "
+            "External payment state must be reconciled before retry."
+        )
+        row.decided_at = now
+        if task_row:
+            task_row.status = "EXECUTION_REQUIRES_RECONCILIATION"
+            task_row.reason = row.reason
+            task_row.completed_at = now
+        db.commit()
+        raise HTTPException(status_code=409, detail=row.reason)
+
+    try:
+        task = ColonyTask(
+            task_id=row.task_id,
+            prompt=row.prompt,
+            human_consent=row.human_consent,
+            biometric_token=json.loads(row.biometric_token_json) if row.biometric_token_json else None,
+            action_type=row.action_type,
+        )
+        agent_outputs = json.loads(row.agent_outputs_json)
+        lq_data = json.loads(row.lq_json)
+        lq = type("StoredLQ", (), {"composite": float(lq_data["composite"])})()
+
+        # Recompute the deterministic LQ score before execution. Human approval
+        # does not authorize stale or tampered evaluation state.
+        fresh_lq = coordinator.lq_engine.score(task.prompt, agent_outputs)
+        if abs(float(fresh_lq.composite) - float(lq.composite)) > 1e-9:
+            raise RuntimeError(
+                "stored safety result no longer matches a fresh deterministic LQ evaluation"
+            )
+
+        committed_action = coordinator._build_action(task, agent_outputs, fresh_lq)
+        lineage_hash = append_lineage(
+            db,
+            task_id,
+            task.prompt,
+            fresh_lq.composite,
+            committed_action,
+        )
+
+        payment = process_manna_payment(task_id, lineage_hash)
+        db.add(
+            PaymentRecordModel(
+                task_id=task_id,
+                lineage_hash=lineage_hash,
+                stripe_transfer_id=payment.community_id,
+                amount_total_cents=payment.split.total_cents,
+                community_cents=payment.split.community_cents,
+                crew_cents=payment.split.crew_cents,
+                architect_cents=payment.split.architect_cents,
+                status=payment.status,
+                stripe_error=payment.error,
+            )
+        )
+
+        row.reason = reason if payment.status in {"completed", "mock"} else (
+            f"Payment execution failed: {payment.error or 'unknown error'}"
+        )
+        row.status = "APPROVED" if payment.status in {"completed", "mock"} else "PAYMENT_FAILED"
+        row.decided_at = now
+
+        if task_row:
+            task_row.status = row.status
+            task_row.lineage_hash = lineage_hash
+            task_row.completed_at = now
+            if row.status != "APPROVED":
+                task_row.reason = row.reason
+
+        db.commit()
+
+        return {
+            "task_id": task_id,
+            "status": row.status,
+            "lineage_hash": lineage_hash,
+            "payment": payment.as_dict(),
+        }
+    except Exception as exc:
+        db.rollback()
+        row = db.query(ApprovalRecord).filter_by(task_id=task_id).first()
+        task_row = db.query(TaskRecord).filter_by(task_id=task_id).first()
+        failure_reason = f"Approval execution failed safely: {exc}"
+        if row:
+            row.status = "EXECUTION_ERROR"
+            row.reason = failure_reason
+            row.decided_at = now
+        if task_row:
+            task_row.status = "EXECUTION_ERROR"
+            task_row.reason = failure_reason
+            task_row.completed_at = now
+        db.commit()
+        raise HTTPException(status_code=500, detail=failure_reason) from exc
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
@@ -753,10 +882,11 @@ async def admin_integrations(
     _: None = Depends(require_admin),
 ):
     """Return the authoritative map of what is runtime-connected."""
-    from integration_registry import list_integrations, local_capabilities
+    from integration_registry import local_capabilities
+    from integration_status import runtime_integrations
 
     return {
-        "integrations": list_integrations(),
+        "integrations": runtime_integrations(),
         "local_capabilities": local_capabilities(),
         "note": "Connected means executable in this deployment. Planned means a separate service/API boundary is still required.",
     }

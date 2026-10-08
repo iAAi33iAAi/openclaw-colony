@@ -38,6 +38,15 @@ MANNA_CENTS               = int(os.environ.get("COLONY_MANNA_CENTS", "100"))
 
 MOCK_MODE = not bool(STRIPE_SECRET_KEY)
 
+def validate_payment_mode() -> None:
+    """Reject Stripe mock mode when the deployment declares production."""
+    if MOCK_MODE and os.environ.get("COLONY_ENV", "").lower() == "production":
+        raise RuntimeError(
+            "STRIPE_SECRET_KEY must be configured in production; "
+            "mock MANNA transfers are not permitted."
+        )
+
+
 if MOCK_MODE:
     log.warning(
         "[STRIPE] STRIPE_SECRET_KEY not set — running in MOCK mode. "
@@ -154,6 +163,7 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
     Called by the coordinator immediately after lineage is committed.
     Returns a PaymentResult regardless of success/failure (never raises).
     """
+    validate_payment_mode()
     split = calculate_manna_split(MANNA_CENTS)
 
     if MOCK_MODE:
@@ -169,6 +179,9 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
 
     # Live mode — three separate transfers with idempotency keys
     # Idempotency key = lineage_hash + bucket, so retries are safe
+    community_id = None
+    crew_id = None
+    architect_id = None
     try:
         community_id = _live_transfer(
             split.community_cents,
@@ -202,14 +215,21 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
         )
 
     except Exception as exc:
-        log.error("[STRIPE ERROR] task=%s error=%s", task_id, exc)
+        log.error(
+            "[STRIPE ERROR] task=%s error=%s community=%s crew=%s architect=%s",
+            task_id,
+            exc,
+            community_id,
+            crew_id,
+            architect_id,
+        )
         return PaymentResult(
             task_id=task_id,
             lineage_hash=lineage_hash,
             split=split,
-            community_id=None,
-            crew_id=None,
-            architect_id=None,
+            community_id=community_id,
+            crew_id=crew_id,
+            architect_id=architect_id,
             status="failed",
             error=str(exc),
         )

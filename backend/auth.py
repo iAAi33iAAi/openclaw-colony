@@ -14,12 +14,18 @@ from db import ApiKey, get_db, verify_api_key
 
 # ── Config ────────────────────────────────────────────────────────────────────
 # If COLONY_ADMIN_KEY is set in env, it grants admin-level access.
-ADMIN_KEY = os.environ.get("COLONY_ADMIN_KEY", "")
+def _admin_key() -> str:
+    return os.environ.get("COLONY_ADMIN_KEY", "").strip()
 
-# Set COLONY_AUTH_ENABLED=false to disable auth (dev/test mode)
-AUTH_ENABLED = os.environ.get("COLONY_AUTH_ENABLED", "true").lower() not in (
-    "false", "0", "no", "off"
-)
+
+def _auth_enabled() -> bool:
+    return os.environ.get("COLONY_AUTH_ENABLED", "true").lower() not in (
+        "false", "0", "no", "off"
+    )
+
+
+def _production_mode() -> bool:
+    return os.environ.get("COLONY_ENV", "").lower() == "production"
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -36,7 +42,12 @@ def get_current_key(
     - Otherwise requires a valid Bearer token.
     Raises HTTP 401 on missing/invalid token.
     """
-    if not AUTH_ENABLED:
+    if not _auth_enabled():
+        if _production_mode():
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication cannot be disabled in production.",
+            )
         return None
 
     if credentials is None:
@@ -49,7 +60,8 @@ def get_current_key(
     raw_key = credentials.credentials
 
     # Admin key bypass
-    if ADMIN_KEY and raw_key == ADMIN_KEY:
+    admin_key = _admin_key()
+    if admin_key and raw_key == admin_key:
         return None  # admin — no DB row needed
 
     api_key = verify_api_key(db, raw_key)
@@ -70,13 +82,14 @@ def require_admin(
     Stricter dependency for /admin routes.
     Requires COLONY_ADMIN_KEY to be set and matched exactly.
     """
-    if not ADMIN_KEY:
+    admin_key = _admin_key()
+    if not admin_key:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access not configured. Set COLONY_ADMIN_KEY env var.",
         )
 
-    if credentials is None or credentials.credentials != ADMIN_KEY:
+    if credentials is None or credentials.credentials != admin_key:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Invalid admin key.",

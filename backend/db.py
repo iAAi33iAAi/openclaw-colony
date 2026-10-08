@@ -20,6 +20,8 @@ from sqlalchemy import (
     Text,
     create_engine,
     event,
+    insert,
+    select,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -184,25 +186,41 @@ def append_lineage(
     lq_composite: float,
     committed_action: str,
 ) -> str:
-    """Compute next chain link, persist it, return the new hash."""
-    prev = get_last_lineage_hash(db)
-    payload = f"{prev}:{task_id}:{committed_action}"
-    new_hash = hashlib.sha256(payload.encode()).hexdigest()
+    """Append a lineage link under a SQLite write lock.
+
+    The caller's session is reused so the lock does not compete with another
+    connection. Any preceding reads are explicitly rolled back before the
+    immediate write transaction begins.
+    """
+    db.rollback()
     prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
+    db.connection().exec_driver_sql("BEGIN IMMEDIATE")
+    try:
+        row = db.execute(
+            select(LineageRecord.lineage_hash)
+            .order_by(LineageRecord.id.desc())
+            .limit(1)
+        ).first()
+        prev = row[0] if row else "GENESIS"
 
-    record = LineageRecord(
-        task_id=task_id,
-        prompt_hash=prompt_hash,
-        lq_composite=lq_composite,
-        lineage_hash=new_hash,
-        prev_hash=prev,
-    )
-    db.add(record)
-    db.commit()
-    return new_hash
+        payload = f"{prev}:{task_id}:{committed_action}"
+        new_hash = hashlib.sha256(payload.encode()).hexdigest()
 
+        db.execute(
+            insert(LineageRecord).values(
+                task_id=task_id,
+                prompt_hash=prompt_hash,
+                lq_composite=lq_composite,
+                lineage_hash=new_hash,
+                prev_hash=prev,
+            )
+        )
+        db.commit()
+        return new_hash
+    except Exception:
+        db.rollback()
+        raise
 
-# ── API key helpers ───────────────────────────────────────────────────────────
 
 def create_api_key(db: Session, label: str = "", stripe_account_id: str = "") -> dict:
     """Generate a new API key. Returns {'key_id': ..., 'raw_key': ...}."""
