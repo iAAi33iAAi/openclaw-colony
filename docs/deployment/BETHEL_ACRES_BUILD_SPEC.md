@@ -1,7 +1,7 @@
 # Node 001 — Bethel Acres Physical Deployment Specification
 
 **Version:** 1.0  
-**Status:** READY FOR DEPLOYMENT  
+**Status:** PLANNING / DEPLOYMENT SPECIFICATION — physical deployment not independently established  
 **Location:** Bethel Acres, Oklahoma  
 **Timeline:** 16 weeks to operational  
 **Total Budget:** $90,310  
