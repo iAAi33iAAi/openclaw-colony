@@ -40,6 +40,7 @@ from federation import (
 from federation_routes import router as federation_router
 from biometric import init_biometric_tables, record_accountability
 from biometric_routes import router as biometric_router
+from caios_adapter import CAIOSAdapter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -326,6 +327,10 @@ class TaskRequest(BaseModel):
     human_consent:    bool = True
     biometric_token:  Optional[dict] = None   # Gate 0 attestation token
     action_type:      str  = "proposal"
+
+
+class CAIOSEvaluateRequest(BaseModel):
+    prompt: str
 
 
 class TaskResponse(BaseModel):
@@ -677,3 +682,20 @@ if __name__ == "__main__":
         port=8000,
         reload=False,
     )
+
+@app.get("/admin/caios")
+@limiter.limit(RATE_ADMIN)
+async def caios_status(request: Request, _: Any = Depends(require_admin)):
+    """Report whether an external CAIOS Project Andrew checkout is configured."""
+    return CAIOSAdapter().status()
+
+
+@app.post("/admin/caios/evaluate")
+@limiter.limit(RATE_ADMIN)
+async def caios_evaluate(
+    request: Request,
+    req: CAIOSEvaluateRequest,
+    _: Any = Depends(require_admin),
+):
+    """Run CAIOS as an advisory evaluator; this endpoint never authorizes execution."""
+    return CAIOSAdapter().evaluate(req.prompt)
