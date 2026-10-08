@@ -24,6 +24,7 @@ Environment variables:
 
 import asyncio
 import hashlib
+import math
 import logging
 import os
 import uuid
@@ -48,6 +49,20 @@ QUORUM        = float(os.environ.get("FEDERATION_QUORUM", "0.51"))
 ADMIN_KEY     = os.environ.get("COLONY_ADMIN_KEY", "")
 
 PEER_URLS: list[str] = [p.strip() for p in PEERS_RAW.split(",") if p.strip()]
+
+
+def calculate_required_quorum(active_peers: int, quorum_threshold: float = QUORUM) -> int:
+    """Return the minimum approvals required by the federation quorum policy.
+
+    The threshold is rounded upward deliberately. A fractional requirement may
+    never be truncated to a lower integer because doing so would create a
+    fail-open consensus path.
+    """
+    if active_peers <= 0:
+        return 0
+    if not 0.0 < quorum_threshold <= 1.0:
+        raise ValueError("FEDERATION_QUORUM must be > 0 and <= 1.0")
+    return max(1, math.ceil(active_peers * quorum_threshold))
 
 
 # ── Federation DB models ──────────────────────────────────────────────────────
@@ -246,7 +261,7 @@ def record_vote(
 
         active_peers = db.query(FederatedNode).filter_by(active=True).count()
         total_votes  = proposal.votes_for + proposal.votes_against
-        quorum_n     = max(1, int(active_peers * QUORUM))
+        quorum_n     = calculate_required_quorum(active_peers, QUORUM)
 
         if proposal.votes_for >= quorum_n:
             proposal.status        = "approved"
