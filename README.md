@@ -15,7 +15,7 @@
 
 OpenClaw Colony is a **sovereign governance and transaction safety system** for intentional communities and cooperative land projects.
 
-Every transaction — money, resources, decisions — passes through a 4-gate safety pipeline before it executes. No actor can steal from the community and hide. Every action is permanently recorded in a SHA-256 lineage chain linked to a verified biometric identity.
+The primary transaction validation path uses a four-gate safety pipeline. Biometric Gate 0 is environment-configurable and is disabled in the default test configuration. Validated gate outcomes and authorized actions are recorded in the lineage/accountability system. These controls are designed to block or expose unauthorized behavior; they are not an absolute guarantee that no actor can ever compromise a deployment.
 
 **Built for:** cooperatives, land trusts, intentional communities, regenerative settlements.
 **Built by:** one person, on a laptop, for free, because the people who needed it couldn't wait.
@@ -106,7 +106,7 @@ Every transaction passes through all 4 gates sequentially. Any failure blocks im
 | 2 | Love Quality | Composite score ≥ 0.85, range [0.0, 1.0] |
 | 3 | Extraction Scan | 27 regex patterns: bypass_treasury, rug_pull, etc. |
 
-Every transaction — approved OR blocked — is written to the SHA-256 lineage chain. **No actor can hide.**
+Validated transaction outcomes are written to the SHA-256 lineage/accountability records. The repository provides tamper-detection and audit mechanisms, but does not establish an absolute "no actor can hide" security guarantee.
 
 ---
 
@@ -241,9 +241,9 @@ COLONY_BIOMETRIC_REQUIRED=true      # Set false for development only
 
 | Slice | Status |
 |-------|--------|
-| First Node Online | ✅ Ready to deploy |
-| Betrayal-Proof Decision | ✅ Code complete |
-| Two Nodes, Federation | ✅ Code complete |
+| First Node Online | 🟡 Pilot / deployment preparation |
+| Safety-gated decision path | 🟡 Implemented and under hardening |
+| Federation | 🟡 Implemented; security hardening and independent verification ongoing |
 | Node 001 Physical — Bethel Acres | 🔄 Planned |
 | v1.0.0 — Genesis | 🎯 The destination |
 
@@ -276,4 +276,4 @@ Not corporations. Not investors. Not institutions. People.
 **AETHEL Operations Platform** — the web front door for the current Colony runtime.
 
 **Node 001 — Bethel Acres, Oklahoma**
-**Built for free. Given freely. Forever.**
+**Pilot target; deployment status requires external operational evidence.**
