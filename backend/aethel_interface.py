@@ -99,6 +99,11 @@ LQ_THRESHOLD = 0.85
 def _load_bas_secret() -> bytes:
     raw = _os.environ.get("COLONY_BAS_SECRET", "")
     if not raw:
+        if _os.environ.get("COLONY_ENV", "").lower() == "production":
+            raise RuntimeError(
+                "COLONY_BAS_SECRET must be configured in production; "
+                "ephemeral biometric signing is not permitted."
+            )
         import secrets as _secrets
         ephemeral = _secrets.token_hex(32)
         log.warning(
