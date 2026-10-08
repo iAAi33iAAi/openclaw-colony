@@ -102,3 +102,8 @@ def test_integration_registry_reports_external_endpoint_configuration(monkeypatc
     items = {item["key"]: item for item in list_integrations()}
     assert items["sports-math"]["configured"] is True
     assert items["sports-math"]["endpoint"] == "http://sports-math.local"
+
+
+def test_approval_model_exists():
+    from db import ApprovalRecord
+    assert ApprovalRecord.__tablename__ == "approvals"
