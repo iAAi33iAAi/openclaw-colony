@@ -58,6 +58,23 @@ class Base(DeclarativeBase):
 
 # ── Models ────────────────────────────────────────────────────────────────────
 
+class TaskRecord(Base):
+    """Persistent request history — one row for every evaluated task."""
+    __tablename__ = "tasks"
+
+    id              = Column(Integer, primary_key=True, index=True)
+    task_id         = Column(String(36), unique=True, nullable=False, index=True)
+    prompt_hash     = Column(String(64), nullable=False)
+    action_type     = Column(String(64), nullable=False, default="proposal")
+    human_consent   = Column(Boolean, nullable=False, default=False)
+    lq_composite    = Column(Float, nullable=False, default=0.0)
+    status          = Column(String(32), nullable=False)
+    blocked_at_gate = Column(Integer, nullable=True)
+    reason          = Column(Text, nullable=True)
+    lineage_hash    = Column(String(64), nullable=True)
+    submitted_at    = Column(DateTime, nullable=False)
+    completed_at    = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
 class LineageRecord(Base):
     """Persistent SHA-256 hash chain — one row per APPROVED task."""
     __tablename__ = "lineage"

@@ -28,7 +28,7 @@ from colony_agents.innovation_agent  import InnovationAgent
 # ── New infrastructure ────────────────────────────────────────────────────────
 from db import (
     init_db, get_db, append_lineage,
-    create_api_key, PaymentRecord, SessionLocal,
+    create_api_key, PaymentRecord, TaskRecord, SessionLocal,
 )
 from auth import get_current_key, require_admin
 from rate_limit import limiter, RATE_PROCESS, RATE_ADMIN, RATE_WEBHOOK
@@ -205,6 +205,29 @@ class ColonyCoordinator:
                 aethel_result.get("reason"),
             )
 
+        # 7 — Persist the complete request outcome (approved or blocked)
+        db = SessionLocal()
+        try:
+            submitted_at = datetime.fromisoformat(task.submitted_at)
+            db.add(
+                TaskRecord(
+                    task_id=task.task_id,
+                    prompt_hash=__import__("hashlib").sha256(task.prompt.encode()).hexdigest(),
+                    action_type=task.action_type,
+                    human_consent=task.human_consent,
+                    lq_composite=lq.composite,
+                    status=aethel_result["verdict"],
+                    blocked_at_gate=aethel_result.get("blocked_at_gate"),
+                    reason=aethel_result.get("reason"),
+                    lineage_hash=lineage_hash,
+                    submitted_at=submitted_at,
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
         return ColonyResult(
             task_id=task.task_id,
             prompt=task.prompt,
@@ -308,6 +331,7 @@ class TaskRequest(BaseModel):
 class TaskResponse(BaseModel):
     task_id:          str
     prompt:           str
+    agent_outputs:    dict
     lq_score:         dict
     aethel_verdict:   str
     aethel_gates:     dict
@@ -350,6 +374,7 @@ async def process_task(
     return TaskResponse(
         task_id=result.task_id,
         prompt=result.prompt,
+        agent_outputs=result.agent_outputs,
         lq_score=result.lq_score,
         aethel_verdict=result.aethel_verdict,
         aethel_gates=result.aethel_gates,
@@ -501,6 +526,40 @@ async def admin_revoke_key(
     return {"status": "revoked", "key_id": key_id}
 
 
+@app.get("/admin/tasks")
+@limiter.limit(RATE_ADMIN)
+async def admin_tasks(
+    request: Request,
+    limit: int = 100,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Return complete evaluated request history, including blocked tasks."""
+    records = (
+        db.query(TaskRecord)
+        .order_by(TaskRecord.id.desc())
+        .limit(min(limit, 500))
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "task_id": r.task_id,
+            "prompt_hash": r.prompt_hash,
+            "action_type": r.action_type,
+            "human_consent": r.human_consent,
+            "lq_composite": r.lq_composite,
+            "status": r.status,
+            "blocked_at_gate": r.blocked_at_gate,
+            "reason": r.reason,
+            "lineage_hash": r.lineage_hash,
+            "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+            "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+        }
+        for r in records
+    ]
+
+
 @app.get("/admin/lineage")
 @limiter.limit(RATE_ADMIN)
 async def admin_lineage(
@@ -562,6 +621,22 @@ async def admin_payments(
         }
         for r in records
     ]
+
+
+@app.get("/admin/integrations")
+@limiter.limit(RATE_ADMIN)
+async def admin_integrations(
+    request: Request,
+    _: None = Depends(require_admin),
+):
+    """Return the authoritative map of what is runtime-connected."""
+    from integration_registry import list_integrations, local_capabilities
+
+    return {
+        "integrations": list_integrations(),
+        "local_capabilities": local_capabilities(),
+        "note": "Connected means executable in this deployment. Planned means a separate service/API boundary is still required.",
+    }
 
 
 @app.get("/admin/manna/config")

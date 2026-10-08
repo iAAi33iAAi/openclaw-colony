@@ -97,7 +97,6 @@ export default function LoveQualityChecker({ lqScore }: Props) {
         {lqScore.dimensions.map((dim) => {
           const meta    = DIMENSION_META[dim.name] ?? { emoji: "•", color: "#94a3b8" };
           const rawPct  = Math.round(dim.raw_score * 100);
-          const wgtPct  = Math.round(dim.weighted_score * 100);
 
           return (
             <div key={dim.name} style={styles.dimCard}>

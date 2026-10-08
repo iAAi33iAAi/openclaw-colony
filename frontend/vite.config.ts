@@ -7,7 +7,10 @@ export default defineConfig({
     port: 3000,
     proxy: {
       "/process": "http://localhost:8000",
-      "/health":  "http://localhost:8000",
+      "/health": "http://localhost:8000",
+      "/admin": "http://localhost:8000",
+      "/federation": "http://localhost:8000",
+      "/biometric": "http://localhost:8000",
     },
   },
 });

@@ -3,9 +3,9 @@ OpenClaw Colony — Stripe Bridge
 Handles MANNA payment splits on every APPROVED task.
 
 MANNA distribution (from Resources agent spec):
-  82% → Community Pool   (Stripe destination account: STRIPE_COMMUNITY_ACCOUNT)
+  84% → Community Pool   (Stripe destination account: STRIPE_COMMUNITY_ACCOUNT)
   15% → Crew             (Stripe destination account: STRIPE_CREW_ACCOUNT)
-   3% → Architect        (Stripe destination account: STRIPE_ARCHITECT_ACCOUNT)
+   1% → Architect        (Stripe destination account: STRIPE_ARCHITECT_ACCOUNT)
 
 Environment variables required for live mode:
   STRIPE_SECRET_KEY          sk_live_... or sk_test_...
@@ -54,9 +54,9 @@ else:
 @dataclass
 class MannaSplit:
     total_cents:      int
-    community_cents:  int   # 82%
+    community_cents:  int   # 84%
     crew_cents:       int   # 15%
-    architect_cents:  int   # 3%
+    architect_cents:  int   # 1%
 
     def as_dict(self) -> dict:
         return {
@@ -69,14 +69,14 @@ class MannaSplit:
 
 def calculate_manna_split(total_cents: int) -> MannaSplit:
     """
-    Split total_cents into 82/15/3.
-    Architect: 3% (increased from 1% — Architect's Covenant v2)
+    Split total_cents into 84/15/1.
+    Architect: 1% (binding Architect's Covenant)
     Crew:      15%
-    Community: 82%
+    Community: 84%
     Rounding: community absorbs any remainder to ensure total is exact.
     """
     crew_cents      = round(total_cents * 0.15)
-    architect_cents = round(total_cents * 0.03)
+    architect_cents = round(total_cents * 0.01)
     community_cents = total_cents - crew_cents - architect_cents
     return MannaSplit(
         total_cents=total_cents,
@@ -223,7 +223,20 @@ def verify_webhook(payload: bytes, sig_header: str) -> Optional[dict]:
     Returns None if verification fails or STRIPE_WEBHOOK_SECRET is not set.
     """
     if not STRIPE_WEBHOOK_SECRET:
-        log.warning("[WEBHOOK] STRIPE_WEBHOOK_SECRET not set — skipping verification.")
+        # Never accept unsigned webhooks in normal operation. An explicit,
+        # separately named dev-only flag is required for local/mock testing.
+        dev_mode = os.environ.get("COLONY_DEV_MODE", "").lower() == "true"
+        allow_unverified = os.environ.get(
+            "COLONY_ALLOW_UNVERIFIED_WEBHOOKS", ""
+        ).lower() == "true"
+        if not (dev_mode and allow_unverified):
+            log.error(
+                "[WEBHOOK] STRIPE_WEBHOOK_SECRET missing — rejecting unsigned webhook."
+            )
+            return None
+        log.warning(
+            "[WEBHOOK] unsigned webhook accepted only because explicit dev override is enabled."
+        )
         import json
         try:
             return json.loads(payload)

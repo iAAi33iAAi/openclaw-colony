@@ -1,5 +1,4 @@
 # OpenClaw Colony — CI Pipeline
-# Runs on every push to main
 # Builds Rust kernel, runs 728 tests, verifies covenant
 
 name: Colony CI
@@ -22,7 +21,7 @@ env:
 jobs:
 
   test:
-    name: "Build Kernel + Run 728 Tests"
+    name: "Build Kernel + Run Full Test Suite"
     runs-on: ubuntu-latest
 
     steps:
@@ -69,7 +68,7 @@ jobs:
             --tb=short \
             --junit-xml=/tmp/test-results.xml
 
-      - name: Verify covenant (3% architect split)
+      - name: Verify covenant (1% architect / 84% community / 15% crew split)
         working-directory: backend
         run: |
           python - << 'PYCHECK'
@@ -79,11 +78,11 @@ jobs:
 
           from stripe_bridge import calculate_manna_split
           split = calculate_manna_split(10000)
-          assert split.architect_cents == 300, f"COVENANT VIOLATION: architect={split.architect_cents}, expected 300 (3%)"
-          assert split.community_cents == 8200, f"COVENANT VIOLATION: community={split.community_cents}, expected 8200 (82%)"
+          assert split.architect_cents == 100, f"COVENANT VIOLATION: architect={split.architect_cents}, expected 100 (1%)"
+          assert split.community_cents == 8400, f"COVENANT VIOLATION: community={split.community_cents}, expected 8400 (84%)"
           assert split.crew_cents == 1500, f"COVENANT VIOLATION: crew={split.crew_cents}, expected 1500 (15%)"
           assert split.architect_cents + split.community_cents + split.crew_cents == 10000
-          print("✅ Covenant verified: 3% architect / 82% community / 15% crew")
+          print("✅ Covenant verified: 1% architect / 84% community / 15% crew")
 
           from aethel_interface import LQ_THRESHOLD
           assert LQ_THRESHOLD == 0.85, f"COVENANT VIOLATION: LQ threshold={LQ_THRESHOLD}, expected 0.85"
@@ -164,7 +163,7 @@ jobs:
           echo "  OPENCLAW COLONY — CI COMPLETE"
           echo "================================================"
           echo ""
-          echo "  Covenant: 3% Architect / 82% Community / 15% Crew"
+          echo "  Covenant: 1% Architect / 84% Community / 15% Crew"
           echo "  License:  AGPL v3 + Architect's Covenant"
           echo "  Node:     001 — Bethel Acres, Oklahoma"
           echo ""

@@ -1,0 +1,26 @@
+name: AETHEL Deployment Gate
+
+on:
+  push:
+    branches: [main, "integration/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  deployment-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Syntax check deployment gate
+        run: python -m py_compile scripts/deploy_gate.py
+      - name: Run deployment admission gate
+        run: python scripts/deploy_gate.py
+      - name: Install test runner
+        run: python -m pip install --disable-pip-version-check pytest
+      - name: Run covenant tests
+        working-directory: backend
+        run: |
+          python -m pytest ../tests/test_covenant.py -q
