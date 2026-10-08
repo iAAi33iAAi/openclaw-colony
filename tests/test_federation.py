@@ -106,7 +106,7 @@ from federation import (
     init_federation_tables,
     FederatedNode, CrossNodeProposal, FederationVote,
     register_peer, get_active_peers, mark_peer_inactive,
-    record_vote, create_proposal,
+    record_vote, create_proposal, calculate_required_quorum,
     NODE_ID,
 )
 
@@ -205,6 +205,24 @@ class TestNodeRegistry:
             assert db.query(FederatedNode).count() == 5
         finally:
             db.close()
+
+
+class TestQuorumMath:
+
+    def test_three_active_peers_requires_two_approvals(self):
+        assert calculate_required_quorum(3) == 2
+
+    def test_five_active_peers_requires_three_approvals(self):
+        assert calculate_required_quorum(5) == 3
+
+    def test_one_active_peer_requires_one_approval(self):
+        assert calculate_required_quorum(1) == 1
+
+    def test_threshold_validation_is_fail_closed(self):
+        with pytest.raises(ValueError):
+            calculate_required_quorum(3, 0.0)
+        with pytest.raises(ValueError):
+            calculate_required_quorum(3, 1.1)
 
 
 # ── TestCrossNodeProposals ────────────────────────────────────────────────────
