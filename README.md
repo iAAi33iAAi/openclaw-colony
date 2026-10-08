@@ -15,7 +15,7 @@
 
 OpenClaw Colony is a **sovereign governance and transaction safety system** for intentional communities and cooperative land projects.
 
-The primary transaction validation path uses a four-gate safety pipeline. Biometric Gate 0 is environment-configurable and is disabled in the default test configuration. Validated gate outcomes and authorized actions are recorded in the lineage/accountability system. These controls are designed to block or expose unauthorized behavior; they are not an absolute guarantee that no actor can ever compromise a deployment.
+The primary transaction validation path uses a four-gate safety pipeline when biometric enforcement is enabled. Biometric Gate 0 is environment-configurable and is disabled in the default test configuration. Validated gate outcomes and authorized actions are recorded in the lineage/accountability system. These controls are designed to block or expose unauthorized behavior; they are not an absolute guarantee that no actor can ever compromise a deployment.
 
 **Built for:** cooperatives, land trusts, intentional communities, regenerative settlements.
 **Built by:** one person, on a laptop, for free, because the people who needed it couldn't wait.
@@ -39,7 +39,7 @@ Production Docker deployment serves the frontend and proxies the platform API th
 ### Optional CAIOS / Project Andrew runtime
 The platform can call CAIOS as an advisory reasoning engine through `CAIOS_SOURCE_PATH`. Keep the external GPL-3.0 repository in its own checkout and preserve its `LICENSE.txt` and attribution. CAIOS results never authorize an action; the Colony AETHEL safety pipeline remains the execution gate.
 
-## Run A Node In 5 Minutes
+## Run a Local Colony Node in 5 Minutes
 
 ```bash
 curl -sSL https://raw.githubusercontent.com/iAAi33iAAi/openclaw-colony/main/install.sh | bash
@@ -74,7 +74,7 @@ curl http://localhost:8000/health
 │                    │  Rust Safety Kernel      │      │
 │                    │  (PyO3 native module)    │      │
 │                    │                          │      │
-│                    │  Gate 0: Biometric HMAC  │      │
+│                    │  Gate 0: Biometric HMAC/accountability validation  │      │
 │                    │  Gate 1: Human consent   │      │
 │                    │  Gate 2: LQ score ≥ 0.85 │      │
 │                    │  Gate 3: 27-pattern scan │      │
@@ -97,7 +97,7 @@ curl http://localhost:8000/health
 
 ## The 4-Gate Safety Pipeline
 
-Every transaction passes through all 4 gates sequentially. Any failure blocks immediately.
+When biometric enforcement is enabled, the validation path evaluates Gate 0 followed by Gates 1–3 sequentially. Any evaluated gate failure blocks immediately; development configurations may explicitly bypass Gate 0.
 
 | Gate | Name | What It Checks |
 |------|------|----------------|
@@ -276,4 +276,4 @@ Not corporations. Not investors. Not institutions. People.
 **AETHEL Operations Platform** — the web front door for the current Colony runtime.
 
 **Node 001 — Bethel Acres, Oklahoma**
-**Pilot target; deployment status requires external operational evidence.**
+**Pilot target; deployment status requires external operational evidence. Local development nodes do not constitute physical Node 001 deployment evidence.**
