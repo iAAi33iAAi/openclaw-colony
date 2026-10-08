@@ -425,7 +425,7 @@ Completion: Week 16 (4 months from start)
 - [ ] Biometric system: 10 test enrollments successful
 - [ ] Node 001 API: /health endpoint returns 200
 - [ ] Lineage chain: Genesis block verified
-- [ ] All 705 tests passing in production environment
+- [ ] Current automated test suite passes in the validated CI/environment; exact test count is version-dependent
 
 ---
 
