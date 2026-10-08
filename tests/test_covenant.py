@@ -341,7 +341,7 @@ class TestProofOfCovenant:
             "timestamp": int(time.time()),
             "covenant": {
                 "lq_threshold": LQ_THRESHOLD,
-                "architect_split_bps": 300,   # basis points = 3%
+                "architect_split_bps": 100,   # basis points = 1%
                 "extraction_pattern_count": len(_EXTRACTION_SIGNATURES),
                 "manna_sum_check": (
                     split.architect_cents +
@@ -362,7 +362,7 @@ class TestProofOfCovenant:
         assert len(signature) == 64
         assert proof_payload["covenant"]["manna_sum_check"] is True
         assert proof_payload["covenant"]["lq_threshold"] == 0.85
-        assert proof_payload["covenant"]["architect_split_bps"] == 300
+        assert proof_payload["covenant"]["architect_split_bps"] == 100
 
         print(f"\n  Proof of Covenant generated successfully.")
         print(f"  Signature: {signature[:32]}...")
