@@ -17,6 +17,7 @@ EXTERNALS = {
     "project-mono": "AETHEL_PROJECT_MONO_URL",
     "undermoon": "AETHEL_UNDERMOON_URL",
     "aethel-grid": "AETHEL_GRID_URL",
+    "safety-kernel-proof": "AETHEL_PROOF_KERNEL_URL",
 }
 
 
