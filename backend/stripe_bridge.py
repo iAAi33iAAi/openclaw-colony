@@ -163,6 +163,7 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
     Called by the coordinator immediately after lineage is committed.
     Returns a PaymentResult regardless of success/failure (never raises).
     """
+    validate_payment_mode()
     split = calculate_manna_split(MANNA_CENTS)
 
     if MOCK_MODE:
@@ -178,7 +179,6 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
 
     # Live mode — three separate transfers with idempotency keys
     # Idempotency key = lineage_hash + bucket, so retries are safe
-    validate_payment_mode()
     community_id = None
     crew_id = None
     architect_id = None
