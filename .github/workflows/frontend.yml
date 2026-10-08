@@ -1,4 +1,4 @@
-name: Frontend
+name: AETHEL Frontend Build
 
 on:
   push:
