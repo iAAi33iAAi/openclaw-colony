@@ -27,7 +27,7 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    command: ["sh", "-c", "python dev_commit_init.py && uvicorn colony-agents.orchestrator.colony_coordinator_v2:app --host 0.0.0.0 --port 8000 --workers 1 --log-level info"]
+    command: ["sh", "-c", "python dev_commit_init.py && uvicorn colony_agents.orchestrator.colony_coordinator_v2:app --host 0.0.0.0 --port 8000 --workers 1 --log-level info"]
 
   # ── Frontend: React Dashboard ────────────────────────────────────────
   frontend:
