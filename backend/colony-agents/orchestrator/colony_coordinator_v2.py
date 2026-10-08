@@ -28,7 +28,7 @@ from colony_agents.innovation_agent  import InnovationAgent
 # ── New infrastructure ────────────────────────────────────────────────────────
 from db import (
     init_db, get_db, append_lineage,
-    create_api_key, PaymentRecord, SessionLocal,
+    create_api_key, PaymentRecord, TaskRecord, SessionLocal,
 )
 from auth import get_current_key, require_admin
 from rate_limit import limiter, RATE_PROCESS, RATE_ADMIN, RATE_WEBHOOK
@@ -204,6 +204,29 @@ class ColonyCoordinator:
                 aethel_result.get("blocked_at_gate"),
                 aethel_result.get("reason"),
             )
+
+        # 7 — Persist the complete request outcome (approved or blocked)
+        db = SessionLocal()
+        try:
+            submitted_at = datetime.fromisoformat(task.submitted_at)
+            db.add(
+                TaskRecord(
+                    task_id=task.task_id,
+                    prompt_hash=__import__("hashlib").sha256(task.prompt.encode()).hexdigest(),
+                    action_type=task.action_type,
+                    human_consent=task.human_consent,
+                    lq_composite=lq.composite,
+                    status=aethel_result["verdict"],
+                    blocked_at_gate=aethel_result.get("blocked_at_gate"),
+                    reason=aethel_result.get("reason"),
+                    lineage_hash=lineage_hash,
+                    submitted_at=submitted_at,
+                    completed_at=datetime.now(timezone.utc),
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
 
         return ColonyResult(
             task_id=task.task_id,
