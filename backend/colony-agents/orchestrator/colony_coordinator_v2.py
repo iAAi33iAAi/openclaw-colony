@@ -41,6 +41,7 @@ from federation_routes import router as federation_router
 from biometric import init_biometric_tables, record_accountability
 from biometric_routes import router as biometric_router
 from caios_adapter import CAIOSAdapter
+from integration_gateway import capabilities as integration_capabilities, evaluate as integration_evaluate, health as integration_health
 
 logging.basicConfig(
     level=logging.INFO,
@@ -331,6 +332,11 @@ class TaskRequest(BaseModel):
 
 class CAIOSEvaluateRequest(BaseModel):
     prompt: str
+
+
+class IntegrationEvaluateRequest(BaseModel):
+    operation: str
+    payload: dict = {}
 
 
 class TaskResponse(BaseModel):
@@ -682,6 +688,51 @@ if __name__ == "__main__":
         port=8000,
         reload=False,
     )
+
+@app.get("/admin/integrations/{integration_key}/health")
+@limiter.limit(RATE_ADMIN)
+async def integration_health_route(
+    integration_key: str,
+    request: Request,
+    _: Any = Depends(require_admin),
+):
+    try:
+        return integration_health(integration_key)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.get("/admin/integrations/{integration_key}/capabilities")
+@limiter.limit(RATE_ADMIN)
+async def integration_capabilities_route(
+    integration_key: str,
+    request: Request,
+    _: Any = Depends(require_admin),
+):
+    try:
+        return integration_capabilities(integration_key)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/admin/integrations/{integration_key}/evaluate")
+@limiter.limit(RATE_ADMIN)
+async def integration_evaluate_route(
+    integration_key: str,
+    request: Request,
+    req: IntegrationEvaluateRequest,
+    _: Any = Depends(require_admin),
+):
+    try:
+        return integration_evaluate(
+            integration_key,
+            request_id=str(uuid.uuid4()),
+            operation=req.operation,
+            payload=req.payload,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
 
 @app.get("/admin/caios")
 @limiter.limit(RATE_ADMIN)
