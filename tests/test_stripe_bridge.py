@@ -16,6 +16,8 @@ os.environ.setdefault("COLONY_AUTH_ENABLED", "false")
 os.environ.setdefault("COLONY_DB_PATH", ":memory:")
 os.environ.setdefault("COLONY_ADMIN_KEY", "test-admin-secret")
 os.environ.setdefault("COLONY_MANNA_CENTS", "100")
+os.environ.setdefault("COLONY_DEV_MODE", "true")
+os.environ.setdefault("COLONY_ALLOW_UNVERIFIED_WEBHOOKS", "true")
 # No STRIPE_SECRET_KEY -> mock mode
 
 import sys
@@ -347,12 +349,21 @@ class TestPaymentPersistence:
 
 class TestWebhookVerification:
 
-    def test_no_webhook_secret_parses_json(self):
+    def test_no_webhook_secret_accepts_only_with_explicit_dev_override(self, monkeypatch):
         from stripe_bridge import verify_webhook
         payload = json.dumps({"id": "evt_test", "type": "transfer.paid"}).encode()
+        monkeypatch.setenv("COLONY_DEV_MODE", "true")
+        monkeypatch.setenv("COLONY_ALLOW_UNVERIFIED_WEBHOOKS", "true")
         result = verify_webhook(payload, "")
         assert result is not None
         assert result["id"] == "evt_test"
+
+    def test_no_webhook_secret_rejects_by_default(self, monkeypatch):
+        from stripe_bridge import verify_webhook
+        payload = json.dumps({"id": "evt_test", "type": "transfer.paid"}).encode()
+        monkeypatch.setenv("COLONY_DEV_MODE", "false")
+        monkeypatch.delenv("COLONY_ALLOW_UNVERIFIED_WEBHOOKS", raising=False)
+        assert verify_webhook(payload, "") is None
 
     def test_invalid_json_returns_none(self):
         from stripe_bridge import verify_webhook
