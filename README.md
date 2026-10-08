@@ -36,6 +36,9 @@ Then open `http://localhost:3000` and use **Settings** to add a Colony API key/a
 
 Production Docker deployment serves the frontend and proxies the platform API through the same origin, so the browser does not need a hard-coded backend address.
 
+### Optional CAIOS / Project Andrew runtime
+The platform can call CAIOS as an advisory reasoning engine through `CAIOS_SOURCE_PATH`. Keep the external GPL-3.0 repository in its own checkout and preserve its `LICENSE.txt` and attribution. CAIOS results never authorize an action; the Colony AETHEL safety pipeline remains the execution gate.
+
 ## Run A Node In 5 Minutes
 
 ```bash
