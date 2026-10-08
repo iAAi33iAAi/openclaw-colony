@@ -38,6 +38,20 @@ interface HealthResponse {
   biometric?: { required?: string; ttl_seconds?: number };
 }
 
+interface TaskRecord {
+  id: number;
+  task_id: string;
+  action_type: string;
+  human_consent: boolean;
+  lq_composite: number;
+  status: string;
+  blocked_at_gate: number | null;
+  reason: string | null;
+  lineage_hash: string | null;
+  submitted_at: string | null;
+  completed_at: string | null;
+}
+
 interface LineageRecord {
   id: number;
   task_id: string;
@@ -154,6 +168,7 @@ export default function PlatformShell() {
   const [page, setPage] = useState<Page>("overview");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [healthState, setHealthState] = useState<"checking" | "online" | "offline">("checking");
+  const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [lineage, setLineage] = useState<LineageRecord[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [manna, setManna] = useState<MannaConfig | null>(null);
@@ -183,6 +198,7 @@ export default function PlatformShell() {
 
     setAdminError(null);
     const calls = await Promise.allSettled([
+      apiFetch<TaskRecord[]>("/admin/tasks?limit=100", {}, "admin"),
       apiFetch<LineageRecord[]>("/admin/lineage?limit=100", {}, "admin"),
       apiFetch<PaymentRecord[]>("/admin/payments?limit=100", {}, "admin"),
       apiFetch<MannaConfig>("/admin/manna/config", {}, "admin"),
@@ -193,8 +209,9 @@ export default function PlatformShell() {
       apiFetch<{ integrations: Integration[] }>("/admin/integrations", {}, "admin"),
     ]);
 
-    const [lineageResult, paymentsResult, mannaResult, federationResult, nodesResult, membersResult, duressResult, integrationsResult] = calls;
+    const [tasksResult, lineageResult, paymentsResult, mannaResult, federationResult, nodesResult, membersResult, duressResult, integrationsResult] = calls;
 
+    if (tasksResult.status === "fulfilled") setTasks(tasksResult.value);
     if (lineageResult.status === "fulfilled") setLineage(lineageResult.value);
     if (paymentsResult.status === "fulfilled") setPayments(paymentsResult.value);
     if (mannaResult.status === "fulfilled") setManna(mannaResult.value);
@@ -280,6 +297,7 @@ export default function PlatformShell() {
           <Overview
             health={health}
             healthState={healthState}
+            requestCount={tasks.length}
             lineageCount={lineage.length}
             peerCount={federation?.peers.active ?? health?.federation?.active_peers ?? 0}
             hasAdminKey={hasAdminKey}
@@ -295,7 +313,7 @@ export default function PlatformShell() {
         )}
         {page === "agents" && <AgentsPage onCreateRequest={() => setPage("requests")} />}
         {page === "approvals" && <ApprovalsPage onCreateRequest={() => setPage("requests")} />}
-        {page === "history" && <HistoryPage records={lineage} hasAdminKey={hasAdminKey} onSettings={() => setPage("settings")} />}
+        {page === "history" && <HistoryPage records={tasks} hasAdminKey={hasAdminKey} onSettings={() => setPage("settings")} />}
         {page === "economics" && <EconomicsPage payments={payments} manna={manna} hasAdminKey={hasAdminKey} onSettings={() => setPage("settings")} />}
         {page === "network" && <NetworkPage federation={federation} nodes={nodes} hasAdminKey={hasAdminKey} onSettings={() => setPage("settings")} />}
         {page === "people" && <PeoplePage members={members} hasAdminKey={hasAdminKey} onSettings={() => setPage("settings")} />}
@@ -307,9 +325,10 @@ export default function PlatformShell() {
   );
 }
 
-function Overview({ health, healthState, lineageCount, peerCount, hasAdminKey, onCreateRequest, onSettings }: {
+function Overview({ health, healthState, requestCount, lineageCount, peerCount, hasAdminKey, onCreateRequest, onSettings }: {
   health: HealthResponse | null;
   healthState: "checking" | "online" | "offline";
+  requestCount: number;
   lineageCount: number;
   peerCount: number;
   hasAdminKey: boolean;
@@ -328,6 +347,7 @@ function Overview({ health, healthState, lineageCount, peerCount, hasAdminKey, o
       <section className="stat-grid">
         <StatCard label="System" value={healthState === "online" ? "ONLINE" : healthState === "offline" ? "OFFLINE" : "CHECKING"} detail={health?.version ? `API ${health.version}` : "Backend health check"} tone={healthState === "online" ? "good" : healthState === "offline" ? "warn" : "neutral"} />
         <StatCard label="Safety" value="4 gates" detail={health?.gates ?? "Current Colony safety path"} tone="neutral" />
+        <StatCard label="Requests" value={hasAdminKey ? String(requestCount) : "Admin"} detail={hasAdminKey ? "Evaluated requests" : "Connect an admin key to inspect"} tone="neutral" />
         <StatCard label="History" value={hasAdminKey ? String(lineageCount) : "Admin"} detail={hasAdminKey ? "Lineage records visible" : "Connect an admin key to inspect"} tone="neutral" />
         <StatCard label="Network" value={hasAdminKey ? String(peerCount) : "Admin"} detail={hasAdminKey ? "Active peer nodes" : "Connect an admin key to inspect"} tone="neutral" />
       </section>
@@ -357,9 +377,9 @@ function ApprovalsPage({ onCreateRequest }: { onCreateRequest: () => void }) {
   return <section className="empty-state-panel"><div className="empty-state-icon">✓</div><div className="section-kicker">HUMAN AUTHORITY</div><h2>The approval queue is a separate workflow that still needs to be implemented.</h2><p>The current API carries a human-consent value and enforces it during request evaluation, but it does not yet store a durable waiting-for-approval queue. This page deliberately does not pretend otherwise.</p><button className="primary-button" type="button" onClick={onCreateRequest}>Open the live request flow</button></section>;
 }
 
-function HistoryPage({ records, hasAdminKey, onSettings }: { records: LineageRecord[]; hasAdminKey: boolean; onSettings: () => void }) {
-  if (!hasAdminKey) return <ProtectedPage title="History" description="Connect an admin key to view lineage records." onSettings={onSettings} />;
-  return <section className="page-section"><div className="section-intro"><div><div className="section-kicker">SYSTEM MEMORY</div><h2>Lineage history</h2><p>These records come directly from the Colony admin API. They are the currently persisted approved-task lineage records.</p></div><span className="info-pill">{records.length} loaded</span></div><div className="table-card"><table><thead><tr><th>Task</th><th>LQ</th><th>When</th><th>Lineage</th></tr></thead><tbody>{records.map((record) => <tr key={record.id}><td><code>{record.task_id.slice(0, 12)}</code></td><td>{record.lq_composite.toFixed(3)}</td><td>{formatDate(record.committed_at)}</td><td><code>{record.lineage_hash.slice(0, 18)}…</code></td></tr>)}{!records.length && <tr><td colSpan={4}><EmptyTable text="No lineage records are currently stored." /></td></tr>}</tbody></table></div></section>;
+function HistoryPage({ records, hasAdminKey, onSettings }: { records: TaskRecord[]; hasAdminKey: boolean; onSettings: () => void }) {
+  if (!hasAdminKey) return <ProtectedPage title="History" description="Connect an admin key to view complete request history." onSettings={onSettings} />;
+  return <section className="page-section"><div className="section-intro"><div><div className="section-kicker">SYSTEM MEMORY</div><h2>Request history</h2><p>Every evaluated request is now stored, including blocked requests. Approved requests can also carry a lineage record.</p></div><span className="info-pill">{records.length} loaded</span></div><div className="table-card"><table><thead><tr><th>Task</th><th>Status</th><th>LQ</th><th>Gate</th><th>When</th><th>Lineage</th></tr></thead><tbody>{records.map((record) => <tr key={record.id}><td><code>{record.task_id.slice(0, 12)}</code></td><td><StatusBadge value={record.status} /></td><td>{record.lq_composite.toFixed(3)}</td><td>{record.blocked_at_gate === null ? "—" : `Gate ${record.blocked_at_gate}`}</td><td>{formatDate(record.completed_at ?? record.submitted_at)}</td><td><code>{record.lineage_hash ? record.lineage_hash.slice(0, 18) + "…" : "—"}</code></td></tr>)}{!records.length && <tr><td colSpan={6}><EmptyTable text="No request history is currently stored." /></td></tr>}</tbody></table></div></section>;
 }
 
 function EconomicsPage({ payments, manna, hasAdminKey, onSettings }: { payments: PaymentRecord[]; manna: MannaConfig | null; hasAdminKey: boolean; onSettings: () => void }) {
