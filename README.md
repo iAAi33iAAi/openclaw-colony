@@ -145,7 +145,7 @@ openclaw-colony/
 
 The Rust kernel (`backend/aethel-kernel/src/lib.rs`) enforces:
 
-- **Constant-time HMAC** — no timing attacks on biometric verification
+- **Constant-time HMAC comparison** — reduces timing-leakage risk during biometric token verification
 - **Atomic lineage chaining** — gate result and chain hash computed together
 - **27 extraction patterns** — compiled once at load via `OnceLock<RegexSet>`
 - **Gate 2 bounds** — LQ score must be finite and in [0.0, 1.0]
@@ -216,7 +216,7 @@ Every approved transaction triggers an automatic value split:
 ```
 84% → Community Pool
 15% → Crew (contributors)
- 1% → Architect (human_001 — forever, mathematically enforced)
+ 1% → Architect (project covenant allocation)
 ```
 
 Connect Stripe for live payments via `STRIPE_SECRET_KEY`. Without it, runs in mock mode.
@@ -255,9 +255,9 @@ See [`docs/ROADMAP.md`](docs/ROADMAP.md) for full details.
 
 GNU Affero General Public License v3.0 + Architect's Covenant.
 
-**AGPL v3:** Any derivative work or hosted service must publish source modifications.
+**AGPL v3:** Source and network-use obligations are governed by the license; see LICENSE for the applicable legal terms.
 
-**Architect's Covenant (non-waivable):** The 1% MANNA split is preserved in all derivative works. No surveillance. No extraction beyond the defined split. AETHELA veto intact.
+**Architect's Covenant:** The repository defines additional project conditions concerning the 1% MANNA allocation, surveillance, extraction, and AETHELA governance. See LICENSE and the covenant documents for the exact terms.
 
 See [`LICENSE`](LICENSE) for full terms.
 
