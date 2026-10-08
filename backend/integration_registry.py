@@ -89,6 +89,14 @@ INTEGRATIONS = (
         "AETHEL_UNDERMOON_URL",
     ),
     Integration(
+        "caios",
+        "CAIOS / Project Andrew",
+        "ELXaber/chaos-persona",
+        "External paradox/entropy reasoning runtime (advisory only)",
+        "optional",
+        "Separate GPL-3.0 checkout via CAIOS_SOURCE_PATH",
+    ),
+    Integration(
         "aethel-grid",
         "AETHEL Grid",
         "iAAi33iAAi/aethel-grid",
@@ -112,6 +120,7 @@ def local_capabilities() -> dict[str, bool]:
         "agent_orchestrator": "colony_agents.orchestrator.colony_coordinator_v2",
         "stripe_bridge": "stripe_bridge",
         "federation": "federation",
+        "caios_adapter": "caios_adapter",
     }
     return {
         key: importlib.util.find_spec(module) is not None
