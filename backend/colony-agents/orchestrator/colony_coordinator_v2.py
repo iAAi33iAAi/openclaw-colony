@@ -114,6 +114,16 @@ class ColonyCoordinator:
         # 1 — Parallel agent evaluation
         agent_outputs = await self._run_agents(task)
 
+        # Optional CAIOS advisory pass. It contributes analysis only; the local
+        # AETHEL kernel remains the sole execution authority.
+        if os.getenv("CAIOS_ADVISORY_ENABLED", "false").lower() == "true":
+            caios_result = await asyncio.to_thread(
+                CAIOSAdapter().evaluate,
+                task.prompt,
+            )
+            agent_outputs["CAIOS"] = caios_result
+            log.info("[CAIOS] Advisory status=%s", caios_result.get("status"))
+
         # 2 — Love Quality scoring
         lq: LQScore = self.lq_engine.score(task.prompt, agent_outputs)
         log.info(
