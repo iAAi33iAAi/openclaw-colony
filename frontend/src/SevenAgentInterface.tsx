@@ -6,7 +6,7 @@
 
 import React, { useState } from "react";
 import LoveQualityChecker from "./LoveQualityChecker";
-import { apiFetch, getApiKey } from "./api";
+import { apiFetch } from "./api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -93,13 +93,6 @@ export default function SevenAgentInterface() {
     setResult(null);
 
     try {
-      const apiKey = getApiKey();
-      if (!apiKey) {
-        throw new Error(
-          "No API key is connected. Open Settings and add a Colony API key, or use development mode with authentication disabled.",
-        );
-      }
-
       const data = await apiFetch<ColonyResponse>(
         "/process",
         {
