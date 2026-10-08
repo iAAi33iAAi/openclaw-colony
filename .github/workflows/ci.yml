@@ -164,7 +164,7 @@ jobs:
           echo "  OPENCLAW COLONY — CI COMPLETE"
           echo "================================================"
           echo ""
-          echo "  Covenant: 3% Architect / 82% Community / 15% Crew"
+          echo "  Covenant: 1% Architect / 84% Community / 15% Crew"
           echo "  License:  AGPL v3 + Architect's Covenant"
           echo "  Node:     001 — Bethel Acres, Oklahoma"
           echo ""
