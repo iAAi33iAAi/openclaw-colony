@@ -526,6 +526,40 @@ async def admin_revoke_key(
     return {"status": "revoked", "key_id": key_id}
 
 
+@app.get("/admin/tasks")
+@limiter.limit(RATE_ADMIN)
+async def admin_tasks(
+    request: Request,
+    limit: int = 100,
+    _: None = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Return complete evaluated request history, including blocked tasks."""
+    records = (
+        db.query(TaskRecord)
+        .order_by(TaskRecord.id.desc())
+        .limit(min(limit, 500))
+        .all()
+    )
+    return [
+        {
+            "id": r.id,
+            "task_id": r.task_id,
+            "prompt_hash": r.prompt_hash,
+            "action_type": r.action_type,
+            "human_consent": r.human_consent,
+            "lq_composite": r.lq_composite,
+            "status": r.status,
+            "blocked_at_gate": r.blocked_at_gate,
+            "reason": r.reason,
+            "lineage_hash": r.lineage_hash,
+            "submitted_at": r.submitted_at.isoformat() if r.submitted_at else None,
+            "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+        }
+        for r in records
+    ]
+
+
 @app.get("/admin/lineage")
 @limiter.limit(RATE_ADMIN)
 async def admin_lineage(
