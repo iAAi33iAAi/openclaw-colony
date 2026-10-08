@@ -223,7 +223,20 @@ def verify_webhook(payload: bytes, sig_header: str) -> Optional[dict]:
     Returns None if verification fails or STRIPE_WEBHOOK_SECRET is not set.
     """
     if not STRIPE_WEBHOOK_SECRET:
-        log.warning("[WEBHOOK] STRIPE_WEBHOOK_SECRET not set — skipping verification.")
+        # Never accept unsigned webhooks in normal operation. An explicit,
+        # separately named dev-only flag is required for local/mock testing.
+        dev_mode = os.environ.get("COLONY_DEV_MODE", "").lower() == "true"
+        allow_unverified = os.environ.get(
+            "COLONY_ALLOW_UNVERIFIED_WEBHOOKS", ""
+        ).lower() == "true"
+        if not (dev_mode and allow_unverified):
+            log.error(
+                "[WEBHOOK] STRIPE_WEBHOOK_SECRET missing — rejecting unsigned webhook."
+            )
+            return None
+        log.warning(
+            "[WEBHOOK] unsigned webhook accepted only because explicit dev override is enabled."
+        )
         import json
         try:
             return json.loads(payload)
