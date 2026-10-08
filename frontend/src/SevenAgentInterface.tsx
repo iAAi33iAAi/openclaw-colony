@@ -6,6 +6,7 @@
 
 import React, { useState } from "react";
 import LoveQualityChecker from "./LoveQualityChecker";
+import { apiFetch, getApiKey } from "./api";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -47,6 +48,7 @@ interface ColonyResponse {
   committed_action: string | null;
   lineage_hash: string | null;
   timestamp: string;
+  payment?: Record<string, unknown> | null;
   agent_outputs?: Record<string, AgentOutput>;
 }
 
@@ -72,8 +74,6 @@ const AGENT_COLORS: Record<string, string> = {
   Innovation:     "#14b8a6",
 };
 
-const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
-
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function SevenAgentInterface() {
@@ -93,18 +93,23 @@ export default function SevenAgentInterface() {
     setResult(null);
 
     try {
-      const res = await fetch(`${API_BASE}/process`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: prompt.trim(), human_consent: consent }),
-      });
-
-      if (!res.ok) {
-        const body = await res.text();
-        throw new Error(`Colony API error ${res.status}: ${body}`);
+      const apiKey = getApiKey();
+      if (!apiKey) {
+        throw new Error(
+          "No API key is connected. Open Settings and add a Colony API key, or use development mode with authentication disabled.",
+        );
       }
 
-      const data: ColonyResponse = await res.json();
+      const data = await apiFetch<ColonyResponse>(
+        "/process",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: prompt.trim(), human_consent: consent }),
+        },
+        "api",
+      );
+
       setResult(data);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -212,7 +217,7 @@ export default function SevenAgentInterface() {
               {result.aethel_verdict === "APPROVED" ? "✅ APPROVED" : "🚫 BLOCKED"}
             </span>
             <span style={styles.verdictSub}>
-              Aethel Sovereignty Verdict · Task {result.task_id.slice(0, 8)}
+              AETHEL decision · Task {result.task_id.slice(0, 8)}
             </span>
           </div>
 
@@ -245,13 +250,18 @@ export default function SevenAgentInterface() {
           {/* LQ Score panel */}
           <LoveQualityChecker lqScore={result.lq_score} />
 
-          {/* Lineage hash */}
-          {result.lineage_hash && (
-            <div style={styles.lineageBox}>
-              <strong>Lineage Hash:</strong>{" "}
-              <code style={styles.hashCode}>{result.lineage_hash}</code>
-            </div>
-          )}
+          {/* Evidence */}
+          <div style={styles.lineageBox}>
+            <strong>Request ID:</strong>{" "}
+            <code style={styles.hashCode}>{result.task_id}</code>
+            {result.lineage_hash && (
+              <>
+                <br />
+                <strong>Lineage:</strong>{" "}
+                <code style={styles.hashCode}>{result.lineage_hash}</code>
+              </>
+            )}
+          </div>
         </div>
       )}
     </div>
