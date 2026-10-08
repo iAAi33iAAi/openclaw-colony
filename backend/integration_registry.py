@@ -89,6 +89,14 @@ INTEGRATIONS = (
         "AETHEL_UNDERMOON_URL",
     ),
     Integration(
+        "safety-kernel-proof",
+        "AETHEL Safety Kernel Proof Service",
+        "iAAi33iAAi/safety-kernel",
+        "Read-only tamper-evidence and proof verification",
+        "optional",
+        "External AETHEL Interop endpoint via AETHEL_PROOF_KERNEL_URL",
+    ),
+    Integration(
         "caios",
         "CAIOS / Project Andrew",
         "ELXaber/chaos-persona",
