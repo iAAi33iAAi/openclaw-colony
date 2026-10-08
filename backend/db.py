@@ -20,6 +20,8 @@ from sqlalchemy import (
     Text,
     create_engine,
     event,
+    insert,
+    select,
 )
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -184,25 +186,41 @@ def append_lineage(
     lq_composite: float,
     committed_action: str,
 ) -> str:
-    """Compute next chain link, persist it, return the new hash."""
-    prev = get_last_lineage_hash(db)
-    payload = f"{prev}:{task_id}:{committed_action}"
-    new_hash = hashlib.sha256(payload.encode()).hexdigest()
+    """Append a lineage link under a SQLite write lock.
+
+    SQLite's BEGIN IMMEDIATE serializes competing writers before the previous
+    tip is read, preventing two workers from deriving the same predecessor.
+    """
     prompt_hash = hashlib.sha256(prompt.encode()).hexdigest()
 
-    record = LineageRecord(
-        task_id=task_id,
-        prompt_hash=prompt_hash,
-        lq_composite=lq_composite,
-        lineage_hash=new_hash,
-        prev_hash=prev,
-    )
-    db.add(record)
-    db.commit()
-    return new_hash
+    with engine.connect() as conn:
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+        try:
+            row = conn.execute(
+                select(LineageRecord.lineage_hash)
+                .order_by(LineageRecord.id.desc())
+                .limit(1)
+            ).first()
+            prev = row[0] if row else "GENESIS"
 
+            payload = f"{prev}:{task_id}:{committed_action}"
+            new_hash = hashlib.sha256(payload.encode()).hexdigest()
 
-# ── API key helpers ───────────────────────────────────────────────────────────
+            conn.execute(
+                insert(LineageRecord).values(
+                    task_id=task_id,
+                    prompt_hash=prompt_hash,
+                    lq_composite=lq_composite,
+                    lineage_hash=new_hash,
+                    prev_hash=prev,
+                )
+            )
+            conn.commit()
+            return new_hash
+        except Exception:
+            conn.rollback()
+            raise
+
 
 def create_api_key(db: Session, label: str = "", stripe_account_id: str = "") -> dict:
     """Generate a new API key. Returns {'key_id': ..., 'raw_key': ...}."""
