@@ -6,7 +6,7 @@
 > — human_001, Principal Architect
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Tests](https://img.shields.io/badge/tests-705%20passing-brightgreen)]()
+[![Tests](https://img.shields.io/badge/tests-automated-brightgreen)]()
 [![Node](https://img.shields.io/badge/Node%20001-Bethel%20Acres%2C%20Oklahoma-orange)]()
 
 ---
@@ -21,6 +21,20 @@ Every transaction — money, resources, decisions — passes through a 4-gate sa
 **Built by:** one person, on a laptop, for free, because the people who needed it couldn't wait.
 
 ---
+
+## Open the AETHEL Operations Platform
+
+The repository now includes the first AETHEL web front door. The dashboard connects to the existing Colony API for requests, health, lineage, payments, federation, member, security, and integration views.
+
+For local development:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Then open `http://localhost:3000` and use **Settings** to add a Colony API key/admin key when authentication is enabled.
+
+Production Docker deployment serves the frontend and proxies the platform API through the same origin, so the browser does not need a hard-coded backend address.
 
 ## Run A Node In 5 Minutes
 
@@ -108,8 +122,8 @@ openclaw-colony/
 │   ├── stripe_bridge.py            # MANNA 84/15/1 split
 │   ├── db.py                       # SQLite lineage chain
 │   └── colony-agents/              # 7-agent pipeline
-├── frontend/                       # React/TypeScript dashboard
-├── tests/                          # 705 tests (all passing)
+├── frontend/                       # AETHEL Operations Platform (React/TypeScript)
+├── tests/                          # Backend, kernel, covenant, and platform integration tests
 ├── docs/
 │   ├── ROADMAP.md                  # Three vectors, five slices
 │   ├── adr/                        # Architecture Decision Records
@@ -161,7 +175,7 @@ pip install -r requirements.txt
 # Build Rust kernel first:
 cd aethel-kernel && maturin build --release && pip install target/wheels/*.whl && cd ..
 pytest ../tests/ -v
-# Expected: 705 passed, 0 failed
+# Run the complete automated suite. Exact count changes as the platform grows.
 ```
 
 Test coverage:
@@ -255,6 +269,8 @@ Not corporations. Not investors. Not institutions. People.
 [Read the full essay →](ESSAY.md) | [Read the mission →](MISSION.md) | [Read the covenant →](GIVING.md)
 
 ---
+
+**AETHEL Operations Platform** — the web front door for the current Colony runtime.
 
 **Node 001 — Bethel Acres, Oklahoma**
 **Built for free. Given freely. Forever.**
