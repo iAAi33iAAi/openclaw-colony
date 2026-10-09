@@ -2,7 +2,7 @@
 from __future__ import annotations
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Literal
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 Digest = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
@@ -52,6 +52,21 @@ class ModelManifest(StrictModel):
     provider: str = Field(pattern=r"^local:[a-z0-9._-]+$")
     approved: bool
     evaluation_suite_id: Identifier
+
+class SignedKnowledgeContract(StrictModel):
+    contract: KnowledgeContract
+    signer_key_id: Identifier
+    issued_at_utc: datetime
+    signature_algorithm: Literal["Ed25519"] = "Ed25519"
+    signature_b64: str = Field(min_length=1, max_length=512)
+
+    @field_validator("issued_at_utc")
+    @classmethod
+    def require_timezone(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("issued_at_utc must include a timezone")
+        return value.astimezone(timezone.utc)
+
 
 class TelemetryRecord(StrictModel):
     sensor_id: Identifier
@@ -117,6 +132,7 @@ class InspectionResult(StrictModel):
     contract_id: Identifier
     contract_version: str
     model_digest: Digest
+    contract_digest: Digest
     policy_id: Identifier
     created_at_utc: datetime
     record_digest: Digest
