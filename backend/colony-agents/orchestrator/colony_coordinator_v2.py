@@ -164,7 +164,7 @@ class ColonyCoordinator:
         payment_info     = None
 
         approval_status = None
-        approval_required = os.getenv("COLONY_APPROVAL_REQUIRED", "false").lower() == "true"
+        approval_required = os.getenv("COLONY_APPROVAL_REQUIRED", "true").lower() == "true"
         if aethel_result["verdict"] == "APPROVED" and approval_required and not approval_override:
             db = SessionLocal()
             try:
