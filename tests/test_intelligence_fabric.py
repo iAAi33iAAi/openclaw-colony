@@ -475,3 +475,56 @@ async def test_execution_firewall_blocks_tampered_record_and_target_mismatch():
     assert "inspection_record_integrity_invalid" in boundary.reasons
     assert "requested_target_mismatch" in boundary.reasons
     assert "mvd001_advisory_only_no_execution_authority" in boundary.reasons
+
+
+
+@pytest.mark.asyncio
+async def test_expired_contract_holds_before_inference():
+    service, request, provider = fixture()
+    expired_contract = service._contract.model_copy(
+        update={"valid_until_utc": NOW - timedelta(seconds=1)}
+    )
+    expired_service = IntelligenceService(
+        signed_contract=sign_contract(expired_contract, issued_at=NOW - timedelta(minutes=2)),
+        contract_verifier=make_contract_verifier(),
+        manifests=service._manifests,
+        evidence_inspector=service._evidence_inspector,
+        provider=provider,
+    )
+    result = await expired_service.propose(request, now=NOW)
+    assert result.decision == Decision.HOLD
+    assert "contract_expired" in result.reasons
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_revoked_contract_holds_execution_and_inference():
+    service, request, provider = fixture()
+    revoked_contract = service._contract.model_copy(update={"revoked": True})
+    revoked_service = IntelligenceService(
+        signed_contract=sign_contract(revoked_contract),
+        contract_verifier=make_contract_verifier(),
+        manifests=service._manifests,
+        evidence_inspector=service._evidence_inspector,
+        provider=provider,
+    )
+    result = await revoked_service.propose(request, now=NOW)
+    assert result.decision == Decision.REJECTED
+    assert "contract_revoked" in result.reasons
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_unsupported_contract_signature_algorithm_fails_closed():
+    service, request, provider = fixture()
+    unsupported = service._signed_contract.model_copy(update={"signature_algorithm": "RSA"})
+    unsupported_service = IntelligenceService(
+        signed_contract=unsupported,
+        contract_verifier=make_contract_verifier(),
+        manifests=service._manifests,
+        evidence_inspector=service._evidence_inspector,
+        provider=provider,
+    )
+    with pytest.raises(ContractTrustError, match="contract_signature_algorithm_unsupported"):
+        await unsupported_service.propose(request, now=NOW)
+    assert provider.calls == 0
