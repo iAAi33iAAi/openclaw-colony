@@ -13,6 +13,8 @@ from intelligence_fabric.contract_trust import (
     ContractTrustError, Ed25519ContractVerifier, contract_digest, contract_signing_payload,
 )
 from intelligence_fabric.evidence import EvidenceInspector, InMemoryEvidenceRegistry
+from intelligence_fabric.execution_firewall import MVD001ExecutionFirewall
+from intelligence_fabric.verification import verify_inspection_result_integrity
 from intelligence_fabric.providers.ollama_provider import OllamaProvider
 from intelligence_fabric.service import IntelligenceService
 
@@ -432,3 +434,44 @@ async def test_future_issued_contract_fails_closed():
     with pytest.raises(ContractTrustError, match="contract_issued_in_future"):
         await future_service.propose(request, now=NOW)
     assert provider.calls == 0
+
+
+
+@pytest.mark.asyncio
+async def test_decision_record_integrity_detects_mutation():
+    service, request, _ = fixture()
+    result = await service.propose(request, now=NOW)
+    assert verify_inspection_result_integrity(result)
+    tampered = result.model_copy(update={"decision": Decision.REJECTED})
+    assert not verify_inspection_result_integrity(tampered)
+
+
+@pytest.mark.asyncio
+async def test_execution_firewall_always_blocks_even_valid_proposal():
+    service, request, _ = fixture()
+    result = await service.propose(request, now=NOW)
+    assert result.decision == Decision.APPROVE_FOR_REVIEW
+    boundary = MVD001ExecutionFirewall().evaluate(
+        inspection=result,
+        requested_operation="SHUTDOWN",
+        requested_target_id="PUMP-01",
+    )
+    assert boundary.status == "BLOCKED"
+    assert boundary.execution_authorized is False
+    assert "mvd001_advisory_only_no_execution_authority" in boundary.reasons
+
+
+@pytest.mark.asyncio
+async def test_execution_firewall_blocks_tampered_record_and_target_mismatch():
+    service, request, _ = fixture()
+    result = await service.propose(request, now=NOW)
+    tampered = result.model_copy(update={"decision": Decision.REJECTED})
+    boundary = MVD001ExecutionFirewall().evaluate(
+        inspection=tampered,
+        requested_operation="PAYMENT",
+        requested_target_id="BREAKER-99",
+    )
+    assert boundary.execution_authorized is False
+    assert "inspection_record_integrity_invalid" in boundary.reasons
+    assert "requested_target_mismatch" in boundary.reasons
+    assert "mvd001_advisory_only_no_execution_authority" in boundary.reasons
