@@ -82,4 +82,3 @@ def _utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
     return value.astimezone(timezone.utc)
-"
