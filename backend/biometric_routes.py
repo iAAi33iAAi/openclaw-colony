@@ -16,12 +16,15 @@ FastAPI router exposing:
 
 from __future__ import annotations
 
+import hmac
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -44,6 +47,31 @@ from biometric import (
 
 log = logging.getLogger("colony.biometric_routes")
 router = APIRouter(prefix="/biometric", tags=["biometric"])
+
+_scanner_bearer = HTTPBearer(auto_error=False)
+
+
+def require_scanner_device(
+    credentials: Optional[HTTPAuthorizationCredentials] = Security(_scanner_bearer),
+) -> None:
+    """Require a separately provisioned scanner credential before issuing attestations.
+
+    This shared bearer token is a minimum interim control, not cryptographic
+    workload identity. Use TLS, secret-manager delivery, restricted scanner
+    network access, and planned credential rotation in deployments.
+    """
+    expected = os.environ.get("COLONY_SCANNER_BEARER_TOKEN", "").strip()
+    if len(expected) < 32:
+        raise HTTPException(
+            status_code=503,
+            detail="Scanner authentication is not configured with an adequate secret.",
+        )
+    if credentials is None or not hmac.compare_digest(credentials.credentials, expected):
+        raise HTTPException(
+            status_code=401,
+            detail="Scanner authentication failed.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
 
 
 # ── Pydantic schemas ──────────────────────────────────────────────────────────
@@ -143,11 +171,12 @@ def enroll(
 def attest(
     req: AttestRequest,
     db: Session = Depends(get_db),
+    _scanner: None = Depends(require_scanner_device),
 ):
     """
-    Called by the physical scanner after capturing biometrics.
-    Returns a 90-second signed attestation token.
-    No admin key required — scanner hardware authenticates via network isolation.
+    Called by an authenticated scanner after capturing biometrics.
+    Requires the separately provisioned COLONY_SCANNER_BEARER_TOKEN and returns
+    a 90-second signed attestation token. Network isolation alone is not identity.
     """
     try:
         token = issue_attestation(
