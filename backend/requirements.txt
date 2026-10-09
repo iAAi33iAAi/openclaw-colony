@@ -16,6 +16,7 @@ limits>=3.6.0          # Backend for slowapi
 
 # ── API key auth ──────────────────────────────────────────────────────────────
 python-jose[cryptography]>=3.3.0   # JWT utilities (optional future use)
+cryptography>=42.0.0  # Ed25519 issuer-signed Knowledge Contracts
 passlib[bcrypt]>=1.7.4             # Password / key hashing
 
 # ── Async file I/O ────────────────────────────────────────────────────────────
