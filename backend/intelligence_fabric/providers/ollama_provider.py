@@ -1,4 +1,4 @@
-""""Minimal local-only Ollama provider using schema-constrained chat output."""
+"""Minimal local-only Ollama provider using schema-constrained chat output."""
 from __future__ import annotations
 
 import json
@@ -61,4 +61,3 @@ class OllamaProvider:
         if not isinstance(parsed, dict):
             raise ProviderUnavailable("local provider output must be a JSON object")
         return parsed
-"
