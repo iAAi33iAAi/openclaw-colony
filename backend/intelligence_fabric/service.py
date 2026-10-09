@@ -6,11 +6,19 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
-from .contracts import Decision, InspectionResult, KnowledgeContract, ModelManifest, Proposal, ProposalRequest
+from .contracts import (
+    Decision, InspectionResult, KnowledgeContract, ModelManifest, Proposal,
+    ProposalRequest, SignedKnowledgeContract,
+)
+from .contract_trust import ContractTrustError, VerifiedContract
 from .evidence import EvidenceInspector
 from .policy import evaluate_policy
 from .providers.ollama_provider import ProviderUnavailable
 from .verification import canonical_json_bytes, sha256_hex
+
+
+class ContractVerifier(Protocol):
+    def verify(self, envelope: SignedKnowledgeContract, *, now: datetime) -> VerifiedContract: ...
 
 
 class ProposalProvider(Protocol):
@@ -24,42 +32,74 @@ class IntelligenceService:
     def __init__(
         self,
         *,
-        contract: KnowledgeContract,
+        signed_contract: SignedKnowledgeContract,
+        contract_verifier: ContractVerifier,
         manifests: dict[str, ModelManifest],
         evidence_inspector: EvidenceInspector,
         provider: ProposalProvider,
     ):
-        self._contract = contract
+        self._signed_contract = signed_contract
+        self._contract_verifier = contract_verifier
+        # Retained for diagnostics and migration tooling only. Runtime decisions use
+        # the verifier-returned contract, never this unverified reference.
+        self._contract = signed_contract.contract
         self._manifests = dict(manifests)
         self._evidence_inspector = evidence_inspector
         self._provider = provider
 
     async def propose(self, request: ProposalRequest, *, now: datetime | None = None) -> InspectionResult:
         now = _utc(now or datetime.now(timezone.utc))
+        try:
+            verified = self._contract_verifier.verify(self._signed_contract, now=now)
+        except ContractTrustError:
+            raise
+        except Exception as exc:
+            # An implementation error in the trust verifier is also fail-closed.
+            raise ContractTrustError("contract_verifier_failed") from exc
+
+        contract = verified.contract
+
+        def finish(
+            model_digest: str,
+            decision: Decision,
+            reasons: list[str],
+            proposal: Proposal | None = None,
+        ) -> InspectionResult:
+            return self._result(
+                request=request,
+                contract=contract,
+                contract_digest=verified.contract_digest,
+                model_digest=model_digest,
+                decision=decision,
+                reasons=reasons,
+                proposal=proposal,
+                now=now,
+            )
+
         manifest = self._manifests.get(request.model_id)
         if manifest is None:
-            return self._result(request, "0" * 64, Decision.HOLD, ["model_manifest_unavailable"], None, now)
+            return finish("0" * 64, Decision.HOLD, ["model_manifest_unavailable"])
         if manifest.model_id != request.model_id:
-            return self._result(request, manifest.artifact_digest, Decision.REJECTED, ["model_id_mismatch"], None, now)
-        if request.contract_id != self._contract.contract_id:
-            return self._result(request, manifest.artifact_digest, Decision.REJECTED, ["contract_id_mismatch"], None, now)
-        if self._contract.revoked:
-            return self._result(request, manifest.artifact_digest, Decision.REJECTED, ["contract_revoked"], None, now)
-        if now >= self._contract.valid_until_utc:
-            return self._result(request, manifest.artifact_digest, Decision.HOLD, ["contract_expired"], None, now)
-        if not manifest.approved or manifest.artifact_digest not in self._contract.approved_model_digests:
-            return self._result(request, manifest.artifact_digest, Decision.HOLD, ["model_not_approved_by_contract"], None, now)
-        if request.target_id not in self._contract.allowed_targets:
-            return self._result(request, manifest.artifact_digest, Decision.REJECTED, ["target_not_allowed"], None, now)
+            return finish(manifest.artifact_digest, Decision.REJECTED, ["model_id_mismatch"])
+        if request.contract_id != contract.contract_id:
+            return finish(manifest.artifact_digest, Decision.REJECTED, ["contract_id_mismatch"])
+        if contract.revoked:
+            return finish(manifest.artifact_digest, Decision.REJECTED, ["contract_revoked"])
+        if now >= contract.valid_until_utc:
+            return finish(manifest.artifact_digest, Decision.HOLD, ["contract_expired"])
+        if not manifest.approved or manifest.artifact_digest not in contract.approved_model_digests:
+            return finish(manifest.artifact_digest, Decision.HOLD, ["model_not_approved_by_contract"])
+        if request.target_id not in contract.allowed_targets:
+            return finish(manifest.artifact_digest, Decision.REJECTED, ["target_not_allowed"])
         if request.telemetry.target_id != request.target_id:
-            return self._result(request, manifest.artifact_digest, Decision.REJECTED, ["telemetry_target_mismatch"], None, now)
+            return finish(manifest.artifact_digest, Decision.REJECTED, ["telemetry_target_mismatch"])
 
         evidence_reasons = self._evidence_inspector.inspect(
-            contract=self._contract, telemetry=request.telemetry, evidence_refs=request.evidence_refs, now=now
+            contract=contract, telemetry=request.telemetry, evidence_refs=request.evidence_refs, now=now
         )
         # Never send stale, unauthenticated, or unapproved evidence to the model.
         if evidence_reasons:
-            return self._result(request, manifest.artifact_digest, Decision.HOLD, evidence_reasons, None, now)
+            return finish(manifest.artifact_digest, Decision.HOLD, evidence_reasons)
 
         # The manifest is only a claim until the local runtime independently reports
         # the same digest. Fail closed before inference if identity cannot be verified.
@@ -68,11 +108,11 @@ class IntelligenceService:
                 model_id=manifest.model_id, expected_digest=manifest.artifact_digest
             )
         except ProviderUnavailable:
-            return self._result(request, manifest.artifact_digest, Decision.HOLD, ["model_runtime_identity_unavailable"], None, now)
+            return finish(manifest.artifact_digest, Decision.HOLD, ["model_runtime_identity_unavailable"])
         except Exception:
-            return self._result(request, manifest.artifact_digest, Decision.HOLD, ["model_runtime_identity_check_failed"], None, now)
+            return finish(manifest.artifact_digest, Decision.HOLD, ["model_runtime_identity_check_failed"])
         if not identity_matches:
-            return self._result(request, manifest.artifact_digest, Decision.HOLD, ["model_runtime_identity_mismatch"], None, now)
+            return finish(manifest.artifact_digest, Decision.HOLD, ["model_runtime_identity_mismatch"])
 
         prompt = (
             "Generate an advisory factory-maintenance proposal. Human review is mandatory. "
@@ -85,35 +125,40 @@ class IntelligenceService:
                 model_id=manifest.model_id, prompt=prompt, output_schema=Proposal
             )
         except ProviderUnavailable:
-            return self._result(request, manifest.artifact_digest, Decision.HOLD, ["provider_unavailable"], None, now)
+            return finish(manifest.artifact_digest, Decision.HOLD, ["provider_unavailable"])
         except Exception:
-            return self._result(request, manifest.artifact_digest, Decision.HOLD, ["provider_generation_failed"], None, now)
+            return finish(manifest.artifact_digest, Decision.HOLD, ["provider_generation_failed"])
 
-        # Detect tag/model replacement during the inference window and discard the
-        # untrusted output if the runtime no longer reports the approved digest.
+        # Detect tag/model replacement during inference and discard generated output.
         try:
             identity_still_matches = await self._provider.verify_model_identity(
                 model_id=manifest.model_id, expected_digest=manifest.artifact_digest
             )
         except Exception:
-            return self._result(request, manifest.artifact_digest, Decision.HOLD, ["model_runtime_identity_recheck_failed"], None, now)
+            return finish(manifest.artifact_digest, Decision.HOLD, ["model_runtime_identity_recheck_failed"])
         if not identity_still_matches:
-            return self._result(request, manifest.artifact_digest, Decision.HOLD, ["model_runtime_identity_changed_during_inference"], None, now)
+            return finish(
+                manifest.artifact_digest, Decision.HOLD,
+                ["model_runtime_identity_changed_during_inference"]
+            )
 
         try:
             proposal = Proposal.model_validate(raw)
         except ValidationError:
-            return self._result(request, manifest.artifact_digest, Decision.HOLD, ["proposal_schema_invalid"], None, now)
+            return finish(manifest.artifact_digest, Decision.HOLD, ["proposal_schema_invalid"])
 
         decision, reasons = evaluate_policy(
-            contract=self._contract, manifest=manifest, request=request, proposal=proposal,
+            contract=contract, manifest=manifest, request=request, proposal=proposal,
             evidence_reasons=[], now=now,
         )
-        return self._result(request, manifest.artifact_digest, decision, reasons, proposal, now)
+        return finish(manifest.artifact_digest, decision, reasons, proposal)
 
     def _result(
         self,
+        *,
         request: ProposalRequest,
+        contract: KnowledgeContract,
+        contract_digest: str,
         model_digest: str,
         decision: Decision,
         reasons: list[str],
@@ -125,10 +170,11 @@ class IntelligenceService:
             "decision": decision.value,
             "reasons": sorted(set(reasons)),
             "proposal": proposal.model_dump(mode="json") if proposal else None,
-            "contract_id": self._contract.contract_id,
-            "contract_version": self._contract.contract_version,
+            "contract_id": contract.contract_id,
+            "contract_version": contract.contract_version,
             "model_digest": model_digest,
-            "policy_id": self._contract.policy_id,
+            "contract_digest": contract_digest,
+            "policy_id": contract.policy_id,
             "created_at_utc": now.isoformat(),
         }
         digest = sha256_hex(canonical_json_bytes(body))
