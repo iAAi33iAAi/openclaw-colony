@@ -44,12 +44,6 @@ MOCK_MODE = not bool(STRIPE_SECRET_KEY)
 # are implemented and reviewed. Mock mode is unaffected.
 LIVE_EXECUTION_ADMISSION_IMPLEMENTED = False
 
-# The signed, single-use execution-admission receipt verifier is not implemented.
-# This source-level deny gate is intentionally not environment-overridable.
-# Live Stripe transfers remain disabled until that verifier and its boundary tests
-# are implemented and reviewed. Mock mode is unaffected.
-LIVE_EXECUTION_ADMISSION_IMPLEMENTED = False
-
 def validate_payment_mode() -> None:
     """Reject Stripe mock mode when the deployment declares production."""
     if MOCK_MODE and os.environ.get("COLONY_ENV", "").lower() == "production":
