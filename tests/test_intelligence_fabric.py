@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from intelligence_fabric.contracts import Decision, EvidenceRecord, KnowledgeContract, ModelManifest, Proposal, ProposalRequest, RecommendationType, TelemetryRecord
 from intelligence_fabric.evidence import EvidenceInspector
-from intelligence_fabric.service import IntelligenceService
+from intelligence_fabric.service import IntelligenceService\nfrom intelligence_fabric.providers.ollama_provider import OllamaProvider
 
 NOW = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
 MODEL_DIGEST = "a" * 64
@@ -54,13 +54,13 @@ async def test_valid_proposal_is_advisory_only():
 async def test_stale_telemetry_holds():
     service, request, _ = fixture(age_seconds=61)
     result = await service.propose(request, now=NOW)
-    assert result.decision == Decision.HOLD and "telemetry_stale" in result.reasons
+    assert result.decision == Decision.HOLD and "telemetry_stale" in result.reasons\n    assert result.proposal is None
 
 @pytest.mark.asyncio
 async def test_unverified_signature_holds():
     service, request, _ = fixture(signature="forged")
     result = await service.propose(request, now=NOW)
-    assert result.decision == Decision.HOLD and "telemetry_signature_unverified" in result.reasons
+    assert result.decision == Decision.HOLD and "telemetry_signature_unverified" in result.reasons\n    assert result.proposal is None
 
 @pytest.mark.asyncio
 async def test_unapproved_evidence_holds():
@@ -96,3 +96,26 @@ async def test_unknown_model_fails_closed():
 def test_proposal_cannot_remove_human_review():
     with pytest.raises(ValueError):
         Proposal(contract_version="2.0.0", domain="FACTORY", recommendation_type="INSPECT", target_id="PUMP-01", rationale="Attempt to bypass review", evidence_refs=["EVID-001"], requires_human_review=False)
+
+@pytest.mark.asyncio
+async def test_telemetry_target_must_match_request_target():
+    service, request, provider = fixture()
+    changed_telemetry = request.telemetry.model_copy(update={"target_id": "PUMP-OTHER"})
+    request = request.model_copy(update={"telemetry": changed_telemetry})
+    result = await service.propose(request, now=NOW)
+    assert result.decision == Decision.REJECTED
+    assert "telemetry_target_mismatch" in result.reasons
+    assert provider.calls == 0
+
+
+def test_ollama_provider_rejects_non_loopback_and_lookalike_hosts():
+    with pytest.raises(ValueError):
+        OllamaProvider("http://example.com:11434")
+    with pytest.raises(ValueError):
+        OllamaProvider("http://127.0.0.1.evil.example:11434")
+    with pytest.raises(ValueError):
+        OllamaProvider("http://localhost.evil.example:11434")
+
+
+def test_ollama_provider_accepts_loopback():
+    assert OllamaProvider("http://127.0.0.1:11434").base_url == "http://127.0.0.1:11434"
