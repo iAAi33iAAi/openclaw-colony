@@ -14,7 +14,7 @@ APPROVE_FOR_REVIEW is not execution authorization. This package has no actuator,
 
 - `backend/intelligence_fabric/contracts.py`: strict Pydantic contracts, model manifest, telemetry, evidence, proposal and result schemas.
 - `verification.py`: project-local JSON digest helper and explicit signature-verifier protocol. The default signature verifier rejects every signature.
-- `evidence.py`: source/sensor allowlist, freshness, evidence quality, and signature verification.
+- `evidence.py`: source/sensor allowlist, freshness, evidence quality, signature verification, and evidence lookup through an injected registry. Caller-supplied IDs are not treated as approved records.
 - `policy.py`: provisional demo policy, not canonical SPEC-004/CPOL.
 - `providers/ollama_provider.py`: local-loopback Ollama structured output; no cloud fallback.
 - `service.py`: advisory orchestration and integrity-protected decision record.
