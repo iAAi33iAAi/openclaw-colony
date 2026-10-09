@@ -16,7 +16,7 @@ APPROVE_FOR_REVIEW is not execution authorization. This package has no actuator,
 - `verification.py`: project-local JSON digest helper and explicit signature-verifier protocol. The default signature verifier rejects every signature.
 - `evidence.py`: source/sensor allowlist, freshness, evidence quality, signature verification, and evidence lookup through an injected registry. Caller-supplied IDs are not treated as approved records.
 - `policy.py`: provisional demo policy, not canonical SPEC-004/CPOL.
-- `providers/ollama_provider.py`: local-loopback Ollama structured output; no cloud fallback.
+- `providers/ollama_provider.py`: local-loopback Ollama structured output; no cloud fallback. It checks the exact model tag and runtime-reported digest before and after inference.
 - `service.py`: advisory orchestration and integrity-protected decision record.
 - `api.py`: optional FastAPI router factory. The host must apply authentication before mounting it.
 
@@ -29,10 +29,10 @@ APPROVE_FOR_REVIEW is not execution authorization. This package has no actuator,
 ## Important limitations
 
 1. `AcceptSignature` in tests is a test double, not cryptography. Production must inject a real signature verifier backed by managed trust roots and key rotation/revocation.
-2. Contract issuer-signature verification, durable revocation lookup, signed model manifests, and secure key management remain host responsibilities.
+2. Contract issuer-signature verification, durable revocation lookup, signed model manifests, and secure key management remain host responsibilities. A contract object passed into the service is trusted configuration supplied by the host, not a self-authenticating signed contract.
 3. `canonical_json_bytes` is a project-local deterministic serialization profile, not a claim of RFC 8785 conformance.
 4. `record_digest` is not a signature or proof of authorization.
-5. The provider is restricted to local loopback URLs and disables environment proxy trust. Network isolation must still be configured by deployment.
+5. The provider is restricted to a local loopback origin and disables environment proxy trust. Model identity is compared against the digest returned by the local Ollama `/api/tags` endpoint both before and after generation; this is runtime-reported identity, not independent file attestation or measured boot. A tag can still be changed between checks, so the host must protect the model store and runtime from concurrent administrative modification. Network isolation must still be configured by deployment.
 6. The demo does not call the existing Colony transaction coordinator and must not be connected to payment or actuator routes.
 7. The implementation does not compute or authorize using the provisional SPEC-004 metric. Do not claim canonical CPOL conformance from these tests.
 
@@ -47,7 +47,8 @@ pytest -q tests/test_intelligence_fabric.py
 ## Before production
 
 - Implement issuer-signature verification for Knowledge Contracts.
-- Bind model identity to an artifact digest obtained from a trusted registry.
+- Add signed Knowledge Contract envelopes and issuer-signature verification against managed trust anchors.
+- Bind model identity to an artifact digest approved by the contract and independently compared to runtime-reported Ollama tags; add host controls for immutable or locked model tags during inference.
 - Replace in-memory dictionaries with authenticated registries and revocation checks.
 - Define canonical serialization and signature formats normatively.
 - Add authenticated append-only evidence storage and independent verification.
