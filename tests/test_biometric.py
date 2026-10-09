@@ -304,6 +304,19 @@ class TestAttestationIssuance:
         finally:
             db.close()
 
+    @pytest.mark.parametrize(
+        "score",
+        [float("nan"), float("inf"), float("-inf"), -0.01, 1.01, True],
+    )
+    def test_nonfinite_or_out_of_range_liveness_raises(self, score):
+        db = SessionLocal()
+        try:
+            m = _make_member(db)
+            with pytest.raises(ValueError, match="Liveness score must be a finite number"):
+                _issue(db, m, liveness=score)
+        finally:
+            db.close()
+
     def test_liveness_at_threshold_passes(self):
         db = SessionLocal()
         try:
