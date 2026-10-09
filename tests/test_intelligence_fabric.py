@@ -175,3 +175,53 @@ def test_ollama_provider_rejects_non_loopback_and_lookalike_hosts():
 
 def test_ollama_provider_accepts_loopback():
     assert OllamaProvider("http://127.0.0.1:11434").base_url == "http://127.0.0.1:11434"
+
+@pytest.mark.asyncio
+async def test_approved_model_substitution_keeps_contract_permissions():
+    service, request, provider = fixture()
+    second_digest = "d" * 64
+    second_manifest = ModelManifest(
+        model_id="factory-slm-v2", model_version="2.0.0", artifact_digest=second_digest,
+        provider="local:ollama", approved=True, evaluation_suite_id="factory-eval-v2",
+    )
+    contract = service._contract.model_copy(update={
+        "approved_model_digests": {MODEL_DIGEST, second_digest},
+    })
+    swapped_service = IntelligenceService(
+        contract=contract,
+        manifests={"factory-slm": service._manifests["factory-slm"], "factory-slm-v2": second_manifest},
+        evidence_inspector=service._evidence_inspector,
+        provider=provider,
+    )
+    swapped_request = request.model_copy(update={"model_id": "factory-slm-v2"})
+    result = await swapped_service.propose(swapped_request, now=NOW)
+    assert result.decision == Decision.APPROVE_FOR_REVIEW
+    assert result.model_digest == second_digest
+
+
+@pytest.mark.asyncio
+async def test_substituted_model_cannot_expand_target_permissions():
+    service, request, provider = fixture(proposal_target="BREAKER-99")
+    second_digest = "d" * 64
+    second_manifest = ModelManifest(
+        model_id="factory-slm-v2", model_version="2.0.0", artifact_digest=second_digest,
+        provider="local:ollama", approved=True, evaluation_suite_id="factory-eval-v2",
+    )
+    contract = service._contract.model_copy(update={
+        "approved_model_digests": {MODEL_DIGEST, second_digest},
+    })
+    swapped_service = IntelligenceService(
+        contract=contract,
+        manifests={"factory-slm": service._manifests["factory-slm"], "factory-slm-v2": second_manifest},
+        evidence_inspector=service._evidence_inspector,
+        provider=provider,
+    )
+    swapped_request = request.model_copy(update={"model_id": "factory-slm-v2"})
+    result = await swapped_service.propose(swapped_request, now=NOW)
+    assert result.decision == Decision.REJECTED
+    assert "target_not_allowed" in result.reasons
+
+
+def test_service_exposes_no_execution_method():
+    service, _, _ = fixture()
+    assert not hasattr(service, "execute")
