@@ -75,6 +75,8 @@ ATTESTATION_TTL = int(os.environ.get("COLONY_ATTESTATION_TTL", "90"))
 
 # Minimum liveness score to accept (0.0–1.0)
 LIVENESS_THRESHOLD = float(os.environ.get("COLONY_LIVENESS_THRESHOLD", "0.95"))
+if not math.isfinite(LIVENESS_THRESHOLD) or not 0.0 <= LIVENESS_THRESHOLD <= 1.0:
+    raise RuntimeError("COLONY_LIVENESS_THRESHOLD must be finite and between 0.0 and 1.0.")
 
 # Cooling-off windows by MANNA amount
 COOLING_OFF_RULES = [
