@@ -107,7 +107,7 @@ class ProposalRequest(StrictModel):
     target_id: Identifier
     prompt_context: str = Field(min_length=1, max_length=12000)
     telemetry: TelemetryRecord
-    evidence: list[EvidenceRecord] = Field(min_length=1, max_length=64)
+    evidence_refs: list[Identifier] = Field(min_length=1, max_length=64)
 
 class InspectionResult(StrictModel):
     request_id: Identifier
