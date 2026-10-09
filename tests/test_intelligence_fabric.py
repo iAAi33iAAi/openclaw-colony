@@ -528,3 +528,12 @@ async def test_unsupported_contract_signature_algorithm_fails_closed():
     with pytest.raises(ContractTrustError, match="contract_signature_algorithm_unsupported"):
         await unsupported_service.propose(request, now=NOW)
     assert provider.calls == 0
+
+
+
+@pytest.mark.asyncio
+async def test_malformed_inspection_record_integrity_check_fails_closed():
+    service, request, _ = fixture()
+    result = await service.propose(request, now=NOW)
+    malformed = result.model_copy(update={"decision": "NOT_A_DECISION"})
+    assert not verify_inspection_result_integrity(malformed)
