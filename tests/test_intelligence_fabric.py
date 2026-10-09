@@ -25,9 +25,16 @@ class FakeProvider:
     def __init__(self, proposal: dict):
         self.proposal = proposal
         self.calls = 0
+        self.runtime_digests: dict[str, str] = {}
+        self.swap_digest_after_generate: str | None = None
+
+    async def verify_model_identity(self, *, model_id: str, expected_digest: str) -> bool:
+        return self.runtime_digests.get(model_id) == expected_digest
 
     async def generate(self, *, model_id: str, prompt: str, output_schema: type[Proposal]) -> dict:
         self.calls += 1
+        if self.swap_digest_after_generate is not None:
+            self.runtime_digests[model_id] = self.swap_digest_after_generate
         return self.proposal
 
 
@@ -67,6 +74,7 @@ def fixture(*, age_seconds: int = 10, signature: str = "test-valid-signature",
         "uncertainty_flags": [], "requires_human_review": True,
     }
     provider = FakeProvider(proposal)
+    provider.runtime_digests = {"factory-slm": MODEL_DIGEST}
     registry = InMemoryEvidenceRegistry({"EVID-001": evidence})
     service = IntelligenceService(
         contract=contract, manifests={"factory-slm": manifest},
@@ -187,6 +195,7 @@ async def test_approved_model_substitution_keeps_contract_permissions():
     contract = service._contract.model_copy(update={
         "approved_model_digests": {MODEL_DIGEST, second_digest},
     })
+    provider.runtime_digests["factory-slm-v2"] = second_digest
     swapped_service = IntelligenceService(
         contract=contract,
         manifests={"factory-slm": service._manifests["factory-slm"], "factory-slm-v2": second_manifest},
@@ -210,6 +219,7 @@ async def test_substituted_model_cannot_expand_target_permissions():
     contract = service._contract.model_copy(update={
         "approved_model_digests": {MODEL_DIGEST, second_digest},
     })
+    provider.runtime_digests["factory-slm-v2"] = second_digest
     swapped_service = IntelligenceService(
         contract=contract,
         manifests={"factory-slm": service._manifests["factory-slm"], "factory-slm-v2": second_manifest},
@@ -225,3 +235,89 @@ async def test_substituted_model_cannot_expand_target_permissions():
 def test_service_exposes_no_execution_method():
     service, _, _ = fixture()
     assert not hasattr(service, "execute")
+
+
+@pytest.mark.asyncio
+async def test_runtime_digest_mismatch_holds_before_inference():
+    service, request, provider = fixture()
+    provider.runtime_digests["factory-slm"] = "d" * 64
+    result = await service.propose(request, now=NOW)
+    assert result.decision == Decision.HOLD
+    assert "model_runtime_identity_mismatch" in result.reasons
+    assert result.proposal is None and provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_runtime_digest_change_discards_generated_proposal():
+    service, request, provider = fixture()
+    provider.swap_digest_after_generate = "d" * 64
+    result = await service.propose(request, now=NOW)
+    assert result.decision == Decision.HOLD
+    assert "model_runtime_identity_changed_during_inference" in result.reasons
+    assert result.proposal is None and provider.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_ollama_runtime_digest_must_match_exact_model_name(monkeypatch):
+    import httpx
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._payload
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url):
+            assert url == "http://127.0.0.1:11434/api/tags"
+            return FakeResponse({"models": [
+                {"name": "factory-slm:latest", "digest": MODEL_DIGEST},
+                {"name": "factory-slm:prod", "digest": "d" * 64},
+            ]})
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: FakeClient())
+    provider = OllamaProvider()
+    assert await provider.verify_model_identity(
+        model_id="factory-slm:latest", expected_digest=MODEL_DIGEST
+    )
+    assert not await provider.verify_model_identity(
+        model_id="factory-slm", expected_digest=MODEL_DIGEST
+    )
+
+
+@pytest.mark.asyncio
+async def test_ollama_runtime_digest_mismatch_fails_closed(monkeypatch):
+    import httpx
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {"models": [{"name": "factory-slm:latest", "digest": "d" * 64}]}
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url):
+            return FakeResponse()
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: FakeClient())
+    provider = OllamaProvider()
+    assert not await provider.verify_model_identity(
+        model_id="factory-slm:latest", expected_digest=MODEL_DIGEST
+    )
