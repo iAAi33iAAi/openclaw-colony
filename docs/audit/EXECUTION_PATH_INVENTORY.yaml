@@ -1,0 +1,128 @@
+schema_version: "0.1"
+status: "INCOMPLETE_INITIAL_SNAPSHOT"
+as_of: "2026-10-09"
+repository: "iAAi33iAAi/openclaw-colony"
+purpose: >-
+  Evidence-backed inventory of known consequential paths. This file is not a
+  certification or proof that all paths have been found. Unknown and untraced
+  paths are release blockers, not assumed safe.
+related_design: "https://github.com/iAAi33iAAi/openclaw-colony/pull/11"
+inventory_policy:
+  complete: false
+  rule: "Every effect path must be traced from ingress to final side-effecting call and exercised by positive and negative tests."
+  model_assisted_consequential_execution: "DISABLED_PENDING_IMPLEMENTATION_AND_REVIEW"
+  notes:
+    - "The source-level Stripe gate added by this change denies live calls through backend/stripe_bridge.py::_live_transfer."
+    - "The gate does not prove that all non-financial state mutations or other execution surfaces are protected."
+    - "Mock-mode records are not real payments, but they still mutate local state and are not evidence of an authorization boundary."
+entries:
+  - id: "COLONY-HTTP-PROCESS-TO-STRIPE"
+    status: "PARTIALLY_GUARDED_NOT_SYSTEM_WIDE"
+    source:
+      path: "backend/colony-agents/orchestrator/colony_coordinator_v2.py"
+      route: "POST /process"
+      function: "process_task -> ColonyCoordinator.process"
+    observed_effect_path:
+      - "ColonyCoordinator.process"
+      - "append_lineage"
+      - "process_manna_payment"
+      - "backend/stripe_bridge.py::_live_transfer"
+      - "stripe.Transfer.create"
+    current_controls:
+      - "AETHEL kernel verdict is checked before the coordinator's approved branch."
+      - "COLONY_APPROVAL_REQUIRED defaults to true after this change; an explicit environment setting can still affect queue behavior."
+      - "The live transfer helper has a source-level deny gate until signed admission verification is implemented."
+    gaps:
+      - "The request/approval flow does not yet verify a signed, single-use execution-admission receipt."
+      - "Lineage and local database records can still be written without a completed system-wide admission boundary."
+      - "Must test the real coordinator path with a side-effect spy, not only the isolated Stripe helper."
+  - id: "COLONY-ADMIN-APPROVAL-TO-STRIPE"
+    status: "PARTIALLY_GUARDED_NOT_SYSTEM_WIDE"
+    source:
+      path: "backend/colony-agents/orchestrator/colony_coordinator_v2.py"
+      route: "POST /admin/approvals/{task_id}"
+      function: "admin_decide_approval"
+    observed_effect_path:
+      - "require_admin"
+      - "ApprovalRecord pending-claim state transition"
+      - "append_lineage"
+      - "process_manna_payment"
+      - "backend/stripe_bridge.py::_live_transfer"
+      - "stripe.Transfer.create"
+    current_controls:
+      - "Admin route requires the configured administrator dependency."
+      - "The route claims PENDING records with a conditional status update."
+      - "Live Stripe transfer helper denies before calling Stripe until admission verification is implemented."
+    gaps:
+      - "The admin decision is not a signed receipt bound to the immutable action, target, parameters, evidence, policy, and reviewer identity."
+      - "Concurrent and crash-recovery behavior around approval claim, lineage append, and external payment requires dedicated tests."
+  - id: "COLONY-STRIPE-WEBHOOK-STATE-UPDATE"
+    status: "PARTIAL_SIGNATURE_AND_SEQUENTIAL_IDEMPOTENCY_CHECKS"
+    source:
+      path: "backend/colony-agents/orchestrator/colony_coordinator_v2.py"
+      route: "POST /webhook/stripe"
+      function: "stripe_webhook"
+    observed_effect_path:
+      - "verify_webhook"
+      - "WebhookEvent lookup and insertion"
+      - "PaymentRecord status update for transfer events"
+    current_controls:
+      - "Webhook signature verification is implemented when configured with the Stripe webhook secret."
+      - "A sequential duplicate-event test exists."
+    gaps:
+      - "The concurrency behavior of event deduplication has not been proven by this inventory pass."
+      - "This route mutates payment state and requires durable replay/reconciliation review."
+  - id: "COLONY-ADMIN-INTEGRATION-EVALUATION"
+    status: "TRACE_REQUIRED"
+    source:
+      path: "backend/colony-agents/orchestrator/colony_coordinator_v2.py"
+      route: "POST /admin/integrations/{integration_key}/evaluate"
+      function: "integration_evaluate_route"
+    observed_effect_path:
+      - "integration_evaluate"
+      - "registered integration adapter (must be resolved per integration)"
+    current_controls:
+      - "Route has require_admin dependency."
+    gaps:
+      - "Each registered adapter must be traced to its actual effect capabilities and tested."
+  - id: "COLONY-INCLUDED-FEDERATION-ROUTES"
+    status: "UNINVENTORIED"
+    source:
+      path: "coordinator startup includes federation_router"
+      function: "app.include_router(federation_router)"
+    gaps:
+      - "Resolve the import to its exact source file, enumerate every route, and trace outbound and state-mutating effects."
+  - id: "COLONY-INCLUDED-BIOMETRIC-ROUTES"
+    status: "UNINVENTORIED"
+    source:
+      path: "coordinator startup includes biometric_router"
+      function: "app.include_router(biometric_router)"
+    gaps:
+      - "Resolve the import to its exact source file, enumerate every route, and trace persistence, identity, and authorization effects."
+  - id: "COLONY-BACKGROUND-FEDERATION-SYNC"
+    status: "TRACE_REQUIRED"
+    source:
+      path: "backend/colony-agents/orchestrator/colony_coordinator_v2.py"
+      function: "startup -> asyncio.create_task(federation_sync_loop())"
+    gaps:
+      - "Trace network calls, retry behavior, trust/identity checks, and every remote or local mutation reachable from the sync loop."
+  - id: "EXTERNAL-CAIOS-TOOL-DISPATCH"
+    status: "EXTERNAL_INTEGRATION_NOT_SECURITY_REVIEWED_HERE"
+    source:
+      path: "backend/caios_adapter.py"
+      function: "CAIOSAdapter.evaluate -> child process imports external orchestrator"
+    current_controls:
+      - "CAIOS is described by Colony's adapter as advisory; its result does not supply the Stripe admission receipt."
+    gaps:
+      - "A child process is not by itself a security sandbox. Inventory external tool dispatch, script, shell, filesystem, and MCP capabilities separately."
+out_of_scope_pending:
+  - "All other FastAPI routes and routers"
+  - "All persistence writes and database mutation entrypoints"
+  - "Agent-internal tool calls and generated-code execution"
+  - "Shell, PowerShell, filesystem, MCP, deployment, and actuator adapters"
+  - "Direct SDK/API calls that bypass backend/stripe_bridge.py::_live_transfer"
+  - "Queue workers, scheduled tasks, retry paths, and webhooks outside the listed Stripe route"
+release_gate: >-
+  Do not claim system-wide execution admission is implemented until every inventoried
+  path is resolved, all consequential paths are guarded or disabled, the route-to-effect
+  matrix is reviewed, and negative tests prove no effect on denial.
