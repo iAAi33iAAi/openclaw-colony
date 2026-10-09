@@ -1,10 +1,16 @@
+import base64
 from datetime import datetime, timedelta, timezone
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from intelligence_fabric.contracts import (
     Decision, EvidenceRecord, KnowledgeContract, ModelManifest, Proposal,
-    ProposalRequest, RecommendationType, TelemetryRecord,
+    ProposalRequest, RecommendationType, SignedKnowledgeContract, TelemetryRecord,
+)
+from intelligence_fabric.contract_trust import (
+    ContractTrustError, Ed25519ContractVerifier, contract_digest, contract_signing_payload,
 )
 from intelligence_fabric.evidence import EvidenceInspector, InMemoryEvidenceRegistry
 from intelligence_fabric.providers.ollama_provider import OllamaProvider
@@ -14,6 +20,31 @@ NOW = datetime(2026, 10, 9, 12, 0, tzinfo=timezone.utc)
 MODEL_DIGEST = "a" * 64
 TELEMETRY_DIGEST = "b" * 64
 EVIDENCE_DIGEST = "c" * 64
+ISSUER_KEY_ID = "factory-issuer-v1"
+ISSUER_PRIVATE_KEY = Ed25519PrivateKey.from_private_bytes(bytes([19]) * 32)
+ISSUER_PUBLIC_KEY = ISSUER_PRIVATE_KEY.public_key().public_bytes(
+    encoding=serialization.Encoding.Raw,
+    format=serialization.PublicFormat.Raw,
+)
+
+
+def sign_contract(contract: KnowledgeContract, *, issued_at: datetime | None = None) -> SignedKnowledgeContract:
+    envelope = SignedKnowledgeContract(
+        contract=contract,
+        signer_key_id=ISSUER_KEY_ID,
+        issued_at_utc=issued_at or (NOW - timedelta(minutes=1)),
+        signature_algorithm="Ed25519",
+        signature_b64=base64.b64encode(bytes(64)).decode("ascii"),
+    )
+    signature = ISSUER_PRIVATE_KEY.sign(contract_signing_payload(envelope))
+    return envelope.model_copy(update={"signature_b64": base64.b64encode(signature).decode("ascii")})
+
+
+def make_contract_verifier(*, revoked_key_ids: frozenset[str] = frozenset()) -> Ed25519ContractVerifier:
+    return Ed25519ContractVerifier(
+        trusted_public_keys={ISSUER_KEY_ID: ISSUER_PUBLIC_KEY},
+        revoked_key_ids=revoked_key_ids,
+    )
 
 
 class AcceptSignature:
@@ -76,8 +107,11 @@ def fixture(*, age_seconds: int = 10, signature: str = "test-valid-signature",
     provider = FakeProvider(proposal)
     provider.runtime_digests = {"factory-slm": MODEL_DIGEST}
     registry = InMemoryEvidenceRegistry({"EVID-001": evidence})
+    signed_contract = sign_contract(contract)
     service = IntelligenceService(
-        contract=contract, manifests={"factory-slm": manifest},
+        signed_contract=signed_contract,
+        contract_verifier=make_contract_verifier(),
+        manifests={"factory-slm": manifest},
         evidence_inspector=EvidenceInspector(AcceptSignature(), registry), provider=provider,
     )
     request = ProposalRequest(
@@ -197,7 +231,8 @@ async def test_approved_model_substitution_keeps_contract_permissions():
     })
     provider.runtime_digests["factory-slm-v2"] = second_digest
     swapped_service = IntelligenceService(
-        contract=contract,
+        signed_contract=sign_contract(contract),
+        contract_verifier=make_contract_verifier(),
         manifests={"factory-slm": service._manifests["factory-slm"], "factory-slm-v2": second_manifest},
         evidence_inspector=service._evidence_inspector,
         provider=provider,
@@ -221,7 +256,8 @@ async def test_substituted_model_cannot_expand_target_permissions():
     })
     provider.runtime_digests["factory-slm-v2"] = second_digest
     swapped_service = IntelligenceService(
-        contract=contract,
+        signed_contract=sign_contract(contract),
+        contract_verifier=make_contract_verifier(),
         manifests={"factory-slm": service._manifests["factory-slm"], "factory-slm-v2": second_manifest},
         evidence_inspector=service._evidence_inspector,
         provider=provider,
@@ -321,3 +357,78 @@ async def test_ollama_runtime_digest_mismatch_fails_closed(monkeypatch):
     assert not await provider.verify_model_identity(
         model_id="factory-slm:latest", expected_digest=MODEL_DIGEST
     )
+
+
+
+@pytest.mark.asyncio
+async def test_decision_record_binds_verified_contract_digest():
+    service, request, _ = fixture()
+    result = await service.propose(request, now=NOW)
+    assert result.decision == Decision.APPROVE_FOR_REVIEW
+    assert result.contract_digest == contract_digest(service._contract)
+
+
+@pytest.mark.asyncio
+async def test_tampered_contract_signature_fails_before_inference():
+    service, request, provider = fixture()
+    tampered_contract = service._contract.model_copy(update={"contract_version": "2.0.1"})
+    tampered_envelope = service._signed_contract.model_copy(update={"contract": tampered_contract})
+    tampered_service = IntelligenceService(
+        signed_contract=tampered_envelope,
+        contract_verifier=make_contract_verifier(),
+        manifests=service._manifests,
+        evidence_inspector=service._evidence_inspector,
+        provider=provider,
+    )
+    with pytest.raises(ContractTrustError, match="contract_signature_invalid"):
+        await tampered_service.propose(request, now=NOW)
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_untrusted_contract_signer_fails_closed():
+    service, request, provider = fixture()
+    envelope = service._signed_contract.model_copy(update={"signer_key_id": "attacker-key"})
+    untrusted_service = IntelligenceService(
+        signed_contract=envelope,
+        contract_verifier=make_contract_verifier(),
+        manifests=service._manifests,
+        evidence_inspector=service._evidence_inspector,
+        provider=provider,
+    )
+    with pytest.raises(ContractTrustError, match="contract_signer_untrusted"):
+        await untrusted_service.propose(request, now=NOW)
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_revoked_contract_signer_fails_closed():
+    service, request, provider = fixture()
+    revoked_service = IntelligenceService(
+        signed_contract=service._signed_contract,
+        contract_verifier=make_contract_verifier(revoked_key_ids=frozenset({ISSUER_KEY_ID})),
+        manifests=service._manifests,
+        evidence_inspector=service._evidence_inspector,
+        provider=provider,
+    )
+    with pytest.raises(ContractTrustError, match="contract_signer_revoked"):
+        await revoked_service.propose(request, now=NOW)
+    assert provider.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_future_issued_contract_fails_closed():
+    service, request, provider = fixture()
+    future_envelope = sign_contract(
+        service._contract, issued_at=NOW + timedelta(minutes=5)
+    )
+    future_service = IntelligenceService(
+        signed_contract=future_envelope,
+        contract_verifier=make_contract_verifier(),
+        manifests=service._manifests,
+        evidence_inspector=service._evidence_inspector,
+        provider=provider,
+    )
+    with pytest.raises(ContractTrustError, match="contract_issued_in_future"):
+        await future_service.propose(request, now=NOW)
+    assert provider.calls == 0
