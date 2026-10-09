@@ -1,4 +1,4 @@
-""""Advisory proposal service with no execution or payment side effects."""
+"""Advisory proposal service with no execution or payment side effects."""
 from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Protocol
