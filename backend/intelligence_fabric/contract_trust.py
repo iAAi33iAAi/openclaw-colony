@@ -85,6 +85,8 @@ class Ed25519ContractVerifier:
             raise ValueError("now must be timezone-aware")
         now = now.astimezone(timezone.utc)
 
+        if envelope.signature_algorithm != "Ed25519":
+            raise ContractTrustError("contract_signature_algorithm_unsupported")
         key_id = envelope.signer_key_id
         if key_id in self._revoked_key_ids:
             raise ContractTrustError("contract_signer_revoked")
