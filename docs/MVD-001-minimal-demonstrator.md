@@ -8,17 +8,18 @@
 
 Demonstrate one factory-maintenance proposal flow in which a domain-bounded model produces structured recommendations, evidence is independently inspected, and deterministic policy returns APPROVE_FOR_REVIEW, HOLD, or REJECTED.
 
-APPROVE_FOR_REVIEW is not execution authorization. This package has no actuator, payment, or mutation interface.
+APPROVE_FOR_REVIEW is not execution authorization. This package has no actuator, payment, or mutation interface. The execution firewall is intentionally deny-all and is not wired to the existing Colony transaction coordinator.
 
 ## Components
 
 - `backend/intelligence_fabric/contracts.py`: strict Pydantic schemas, including the signed Knowledge Contract envelope and contract-digest-bound result.
 - `contract_trust.py`: Ed25519 signature verification against host-configured public-key trust anchors, signer revocation IDs, stable set ordering, and canonical contract digests.
+- `execution_firewall.py`: typed deny-all boundary. It checks decision-record integrity but always returns BLOCKED; it cannot issue execution authorization and has no actuator method.
 - `verification.py`: project-local JSON digest helper and telemetry signature-verifier protocol. The default telemetry signature verifier rejects every signature.
 - `evidence.py`: source/sensor allowlist, freshness, evidence quality, signature verification, and evidence lookup through an injected registry. Caller-supplied IDs are not treated as approved records.
 - `policy.py`: provisional demo policy, not canonical SPEC-004/CPOL.
 - `providers/ollama_provider.py`: local-loopback Ollama structured output; no cloud fallback. It checks the exact model tag and runtime-reported digest before and after inference.
-- `service.py`: advisory orchestration and integrity-protected decision record.
+- `service.py`: requires a signed contract plus an explicit verifier, checks local model identity before and after inference, and binds the integrity-protected decision record to the verified contract digest.
 - `api.py`: optional FastAPI router factory. The host must apply authentication before mounting it.
 
 ## Decision semantics
@@ -38,6 +39,7 @@ APPROVE_FOR_REVIEW is not execution authorization. This package has no actuator,
 7. The implementation does not compute or authorize using the provisional SPEC-004 metric. Do not claim canonical CPOL conformance from these tests.
 8. The signed contract payload is a project-local versioned profile built on deterministic JSON; it is not claimed to implement RFC 8785 or a ratified AETHEL serialization standard.
 9. Runtime identity checks narrow the tag-substitution window but cannot eliminate a concurrent runtime/model-store race. The deployment must prevent untrusted actors from modifying Ollama state during inference.
+10. The MVD-001 execution firewall blocks every execution request, including requests following APPROVE_FOR_REVIEW. It is a local tripwire only; because it is not mounted into existing Colony payment/actuator paths, it must not be misrepresented as a portfolio-wide execution control.
 
 ## Run tests
 
@@ -50,6 +52,7 @@ pytest -q tests/test_intelligence_fabric.py
 ## Before production
 
 - Provision and rotate issuer trust anchors, connect key revocation to a durable source, and protect issuer private keys.
+- Integrate deny-by-default authorization at the real system boundary only after a separate signed human-approval protocol, replay protection, durable audit trail, and explicit actuator adapters have been independently designed and reviewed.
 - Ratify the signed-envelope canonicalization profile and add cross-language golden vectors.
 - Bind model identity to an artifact digest approved by the contract and compared to runtime-reported Ollama tags; add host controls for immutable or locked model tags during inference.
 - Replace in-memory dictionaries with authenticated registries and revocation checks.
