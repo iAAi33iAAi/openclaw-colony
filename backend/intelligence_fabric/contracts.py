@@ -57,7 +57,7 @@ class SignedKnowledgeContract(StrictModel):
     contract: KnowledgeContract
     signer_key_id: Identifier
     issued_at_utc: datetime
-    signature_algorithm: Literal["Ed25519"] = "Ed25519"
+    signature_algorithm: Literal["Ed25519"]
     signature_b64: str = Field(min_length=1, max_length=512)
 
     @field_validator("issued_at_utc")
