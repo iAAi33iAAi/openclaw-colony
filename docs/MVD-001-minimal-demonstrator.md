@@ -41,7 +41,7 @@ APPROVE_FOR_REVIEW is not execution authorization. This package has no actuator,
 From repository root, in an environment with backend requirements installed:
 
 ```bash
-PYTHONPATH=backend pytest -q backend/tests/test_intelligence_fabric.py
+pytest -q tests/test_intelligence_fabric.py
 ```
 
 ## Before production
