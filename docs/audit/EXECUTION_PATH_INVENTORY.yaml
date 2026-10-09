@@ -86,19 +86,84 @@ entries:
     gaps:
       - "Each registered adapter must be traced to its actual effect capabilities and tested."
   - id: "COLONY-INCLUDED-FEDERATION-ROUTES"
-    status: "UNINVENTORIED"
+    status: "ROUTES_ENUMERATED_EFFECT_REVIEW_INCOMPLETE"
     source:
-      path: "coordinator startup includes federation_router"
-      function: "app.include_router(federation_router)"
+      path: "backend/federation_routes.py"
+      router_prefix: "/federation"
+      imported_by: "backend/colony-agents/orchestrator/colony_coordinator_v2.py"
+    routes:
+      - "POST /federation/announce -> announce: require_admin; registers or refreshes a peer and commits database state."
+      - "POST /federation/lineage-tip -> receive_lineage_tip: require_admin; updates peer tip/last_seen and may update node state."
+      - "GET /federation/lineage -> serve_lineage: require_admin; reads lineage records for peers."
+      - "GET /federation/nodes -> list_nodes: require_admin; reads peer registry."
+      - "POST /federation/proposals -> receive_proposal: require_admin; stores cross-node proposal and may cast/broadcast votes."
+      - "POST /federation/votes -> receive_vote: require_admin; records vote and may propagate a vote to peers."
+      - "GET /federation/proposals/{proposal_id} -> get_proposal: require_admin; reads proposal/votes."
+      - "GET /federation/status -> federation_status: require_admin; reads federation health/state."
+      - "POST /federation/heartbeat -> receive_heartbeat: require_admin; updates peer state."
+    current_controls:
+      - "Each listed route declares the require_admin dependency."
     gaps:
-      - "Resolve the import to its exact source file, enumerate every route, and trace outbound and state-mutating effects."
+      - "Trace peer authentication and authorization beyond shared admin credentials, especially caller identity and node_id/node_url binding."
+      - "Test remote calls, vote/quorum semantics, duplicate/replay behavior, and all resulting mutations."
+      - "Verify prefix routing and deployment reachability for every route."
   - id: "COLONY-INCLUDED-BIOMETRIC-ROUTES"
-    status: "UNINVENTORIED"
+    status: "ROUTES_ENUMERATED_AUTH_AND_PRIVACY_REVIEW_REQUIRED"
     source:
-      path: "coordinator startup includes biometric_router"
-      function: "app.include_router(biometric_router)"
+      path: "backend/biometric_routes.py"
+      router_prefix: "/biometric"
+      imported_by: "backend/colony-agents/orchestrator/colony_coordinator_v2.py"
+    routes:
+      - "POST /biometric/enroll -> enroll: require_admin; creates member identity/accountability records."
+      - "POST /biometric/attest -> attest: no require_admin dependency; issues a short-lived signed attestation token; handler comments assume scanner hardware is authenticated by network isolation."
+      - "GET /biometric/member/{member_id} -> member_summary: public; returns member accountability summary."
+      - "GET /biometric/history/{member_id} -> member_history: public; returns full action history."
+      - "POST /biometric/legal-export -> legal_export: require_admin; creates evidence export."
+      - "POST /biometric/revoke/{member_id} -> revoke: require_admin; revocation cascade affects identity/tokens/federation state."
+      - "GET /biometric/duress -> list_duress_events: require_admin; reads active duress events."
+      - "POST /biometric/duress/{event_id}/resolve -> resolve_duress: require_admin; changes duress/escrow state."
+      - "GET /biometric/revocations -> list_revocations: public; exposes revocation records."
+      - "GET /biometric/members -> list_members: require_admin; reads member records."
     gaps:
-      - "Resolve the import to its exact source file, enumerate every route, and trace persistence, identity, and authorization effects."
+      - "The attestation route's network-isolation assumption is not a substitute for independently verified workload/device identity; production reachability is unproven."
+      - "Review data-minimization, privacy, authorization, logging, and legal-export controls for public history endpoints and sensitive biometric/accountability data."
+      - "Test token replay/expiry, revocation races, and enrollment/revocation effects at the actual persistence boundary."
+  - id: "COLONY-LEGACY-COORDINATOR-APP"
+    status: "POTENTIAL_LEGACY_INGRESS_DEPLOYMENT_UNKNOWN"
+    source:
+      path: "backend/colony-agents/orchestrator/colony_coordinator.py"
+      routes:
+        - "POST /process"
+        - "GET /health"
+    observed_effect_path:
+      - "POST /process -> ColonyCoordinator.process -> in-memory lineage/action generation when AETHEL verdict is APPROVED"
+    current_controls:
+      - "The route handler itself declares no API-key or require_admin dependency."
+      - "This legacy coordinator does not call process_manna_payment in the reviewed file."
+    gaps:
+      - "Determine whether this app is built, exposed, or deployed alongside colony_coordinator_v2."
+      - "If reachable, protect or disable the legacy /process ingress and add tests proving it cannot bypass current admission policy."
+  - id: "COLONY-ADMIN-API-KEY-LIFECYCLE"
+    status: "AUTHENTICATED_MUTATION_REVIEW_REQUIRED"
+    source:
+      path: "backend/colony-agents/orchestrator/colony_coordinator_v2.py"
+      routes:
+        - "POST /admin/keys"
+        - "DELETE /admin/keys/{key_id}"
+    current_controls:
+      - "Routes declare require_admin."
+    gaps:
+      - "Review credential-creation, revocation, audit, key rotation, and concurrent use semantics as security-sensitive state changes."
+  - id: "COLONY-BIOMETRIC-ATTESTATION-TRUST-BOUNDARY"
+    status: "HIGH_PRIORITY_IDENTITY_REVIEW"
+    source:
+      path: "backend/biometric_routes.py"
+      route: "POST /biometric/attest"
+    observed_effect_path:
+      - "Scanner request -> issue_attestation -> signed short-lived token consumed by the coordinator's biometric gate"
+    gaps:
+      - "Handler has no require_admin dependency and relies on a network-isolation assumption stated in its docstring."
+      - "Confirm device/workload identity, replay protection, token binding to target/action, and exposure in every deployment topology."
   - id: "COLONY-BACKGROUND-FEDERATION-SYNC"
     status: "TRACE_REQUIRED"
     source:
@@ -115,13 +180,35 @@ entries:
       - "CAIOS is described by Colony's adapter as advisory; its result does not supply the Stripe admission receipt."
     gaps:
       - "A child process is not by itself a security sandbox. Inventory external tool dispatch, script, shell, filesystem, and MCP capabilities separately."
-out_of_scope_pending:
-  - "All other FastAPI routes and routers"
-  - "All persistence writes and database mutation entrypoints"
-  - "Agent-internal tool calls and generated-code execution"
-  - "Shell, PowerShell, filesystem, MCP, deployment, and actuator adapters"
-  - "Direct SDK/API calls that bypass backend/stripe_bridge.py::_live_transfer"
-  - "Queue workers, scheduled tasks, retry paths, and webhooks outside the listed Stripe route"
+known_route_indexes:
+  colony_coordinator_v2:
+    source: "backend/colony-agents/orchestrator/colony_coordinator_v2.py"
+    routes:
+      - "POST /process"
+      - "GET /admin/approvals"
+      - "POST /admin/approvals/{task_id}"
+      - "GET /health"
+      - "POST /webhook/stripe"
+      - "POST /admin/keys"
+      - "GET /admin/keys"
+      - "DELETE /admin/keys/{key_id}"
+      - "GET /admin/tasks"
+      - "GET /admin/lineage"
+      - "GET /admin/payments"
+      - "GET /admin/integrations"
+      - "GET /admin/manna/config"
+      - "GET /admin/integrations/{integration_key}/health"
+      - "GET /admin/integrations/{integration_key}/capabilities"
+      - "POST /admin/integrations/{integration_key}/evaluate"
+      - "GET /admin/caios"
+      - "POST /admin/caios/evaluate"
+  out_of_scope_pending:
+    - "All persistence writes and database mutation entrypoints not yet linked to an owning route/worker."
+    - "Agent-internal tool calls and generated-code execution."
+    - "Shell, PowerShell, filesystem, MCP, deployment, and actuator adapters."
+    - "Direct SDK/API calls that bypass backend/stripe_bridge.py::_live_transfer."
+    - "Queue workers, scheduled tasks, retry paths, and webhooks outside the listed Stripe route."
+    - "Confirm which ASGI app is deployed and whether the legacy coordinator can be reached."
 release_gate: >-
   Do not claim system-wide execution admission is implemented until every inventoried
   path is resolved, all consequential paths are guarded or disabled, the route-to-effect
