@@ -1,7 +1,9 @@
-"""Minimal local-only Ollama provider using schema-constrained chat output."""
+"""Minimal local-only Ollama provider with structured output and runtime identity checks."""
 from __future__ import annotations
 
+import hmac
 import json
+import re
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -9,8 +11,11 @@ import httpx
 from pydantic import BaseModel
 
 
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
 class ProviderUnavailable(RuntimeError):
-    pass
+    """The local provider did not provide a verifiable response."""
 
 
 class OllamaProvider:
@@ -24,12 +29,48 @@ class OllamaProvider:
             or parsed.password is not None
             or parsed.query
             or parsed.fragment
+            or parsed.path not in {"", "/"}
         ):
-            raise ValueError("MVD-001 Ollama endpoint must be a plain HTTP loopback URL")
+            raise ValueError("MVD-001 Ollama endpoint must be a plain HTTP loopback origin")
         if timeout_seconds <= 0 or timeout_seconds > 120:
             raise ValueError("timeout_seconds must be in (0, 120]")
         self.base_url = normalized
         self.timeout_seconds = timeout_seconds
+
+    async def verify_model_identity(self, *, model_id: str, expected_digest: str) -> bool:
+        """Compare the approved digest to the digest reported by this local Ollama instance.
+
+        This verifies runtime-reported identity, not measured boot or an independently
+        attested model file. The host still must protect the local runtime and model store.
+        """
+        if not _DIGEST_RE.fullmatch(expected_digest):
+            return False
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout_seconds, trust_env=False) as client:
+                response = await client.get(f"{self.base_url}/api/tags")
+                response.raise_for_status()
+                payload = response.json()
+        except (httpx.HTTPError, OSError, ValueError) as exc:
+            raise ProviderUnavailable("local model identity endpoint unavailable") from exc
+
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(models, list):
+            raise ProviderUnavailable("local model identity response malformed")
+        matches = [
+            item for item in models
+            if isinstance(item, dict)
+            and (item.get("name") == model_id or item.get("model") == model_id)
+        ]
+        # Ambiguous aliases are not accepted.
+        if len(matches) != 1:
+            return False
+        observed = matches[0].get("digest")
+        if not isinstance(observed, str):
+            return False
+        observed = observed.removeprefix("sha256:")
+        if not _DIGEST_RE.fullmatch(observed):
+            return False
+        return hmac.compare_digest(observed, expected_digest)
 
     async def generate(self, *, model_id: str, prompt: str, output_schema: type[BaseModel]) -> dict[str, Any]:
         payload = {
