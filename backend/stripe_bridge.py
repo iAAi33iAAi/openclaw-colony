@@ -126,7 +126,12 @@ def _live_transfer(
     label: str,
     idempotency_key: str,
 ) -> str:
-    """Execute a real Stripe transfer to a connected account."""
+    """Execute a real Stripe transfer to a connected account only when admitted."""
+    if not LIVE_EXECUTION_ADMISSION_IMPLEMENTED:
+        raise RuntimeError(
+            "Live Stripe transfer denied: signed execution-admission verification "
+            "is not implemented. Mock mode remains available; no live transfer was attempted."
+        )
     import stripe
     transfer = stripe.Transfer.create(
         amount=amount_cents,
