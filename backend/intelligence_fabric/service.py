@@ -36,7 +36,7 @@ class IntelligenceService:
             return self._result(request, manifest.artifact_digest, Decision.REJECTED, ["telemetry_target_mismatch"], None, now)
 
         evidence_reasons = self._evidence_inspector.inspect(
-            contract=self._contract, telemetry=request.telemetry, evidence=request.evidence, now=now
+            contract=self._contract, telemetry=request.telemetry, evidence_refs=request.evidence_refs, now=now
         )
         # Do not send untrusted or stale inputs to a model; resolve evidence
         # failures before inference so the model cannot launder them into prose.
@@ -47,7 +47,7 @@ class IntelligenceService:
             "Generate an advisory factory-maintenance proposal. Human review is mandatory. "
             "Use only supplied evidence IDs. Never issue commands or claim authorization.\n"
             + request.prompt_context + "\nEvidence IDs: "
-            + ", ".join(record.evidence_id for record in request.evidence)
+            + ", ".join(request.evidence_refs)
         )
         try:
             raw = await self._provider.generate(model_id=manifest.model_id, prompt=prompt, output_schema=Proposal)
