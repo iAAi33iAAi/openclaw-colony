@@ -27,7 +27,7 @@ def evaluate_policy(*, contract: KnowledgeContract, manifest: ModelManifest, req
         return Decision.REJECTED, ["recommendation_type_not_allowed"]
     if not proposal.requires_human_review:
         return Decision.REJECTED, ["human_review_required"]
-    supplied_ids = {record.evidence_id for record in request.evidence}
+    supplied_ids = set(request.evidence_refs)
     if any(ref not in supplied_ids for ref in proposal.evidence_refs):
         return Decision.REJECTED, ["proposal_references_unknown_evidence"]
     if evidence_reasons:
