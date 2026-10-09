@@ -349,7 +349,16 @@ def issue_attestation(
     if member.suspended:
         raise ValueError(f"Member {member.member_id} is suspended.")
 
-    # 2. Liveness check
+    # 2. Validate score domain before threshold comparison. NaN is especially
+    # important here because NaN < threshold is False and could otherwise pass.
+    if (
+        isinstance(liveness_score, bool)
+        or not isinstance(liveness_score, (int, float))
+        or not math.isfinite(liveness_score)
+        or not 0.0 <= liveness_score <= 1.0
+    ):
+        raise ValueError("Liveness score must be a finite number between 0.0 and 1.0.")
+
     if liveness_score < LIVENESS_THRESHOLD:
         raise ValueError(
             f"Liveness score {liveness_score:.3f} below threshold {LIVENESS_THRESHOLD}."
