@@ -125,6 +125,31 @@ class TestMockPayments:
         result = process_manna_payment("task-001", "hash-abc")
         assert result.status == "mock"
 
+    def test_live_transfer_fails_closed_before_stripe_side_effect(self, monkeypatch):
+        """Live money movement must remain blocked until admission verification exists."""
+        import types
+        import stripe_bridge as bridge
+
+        transfer_calls = []
+
+        class FakeTransfer:
+            @staticmethod
+            def create(**kwargs):
+                transfer_calls.append(kwargs)
+                return types.SimpleNamespace(id="should-not-be-called")
+
+        monkeypatch.setitem(
+            sys.modules, "stripe", types.SimpleNamespace(Transfer=FakeTransfer)
+        )
+        monkeypatch.setattr(bridge, "MOCK_MODE", False)
+        monkeypatch.setattr(bridge, "LIVE_EXECUTION_ADMISSION_IMPLEMENTED", False)
+
+        result = bridge.process_manna_payment("task-live-blocked", "hash-live")
+
+        assert result.status == "failed"
+        assert "execution-admission verification is not implemented" in (result.error or "")
+        assert transfer_calls == []
+
     def test_process_returns_mock_ids(self):
         result = process_manna_payment("task-001", "hash-abc")
         assert result.community_id.startswith("mock_")

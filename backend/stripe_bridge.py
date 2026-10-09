@@ -38,6 +38,12 @@ MANNA_CENTS               = int(os.environ.get("COLONY_MANNA_CENTS", "100"))
 
 MOCK_MODE = not bool(STRIPE_SECRET_KEY)
 
+# The signed, single-use execution-admission receipt verifier is not implemented.
+# This source-level deny gate is intentionally not environment-overridable.
+# Live Stripe transfers remain disabled until that verifier and its boundary tests
+# are implemented and reviewed. Mock mode is unaffected.
+LIVE_EXECUTION_ADMISSION_IMPLEMENTED = False
+
 def validate_payment_mode() -> None:
     """Reject Stripe mock mode when the deployment declares production."""
     if MOCK_MODE and os.environ.get("COLONY_ENV", "").lower() == "production":
@@ -114,7 +120,12 @@ def _live_transfer(
     label: str,
     idempotency_key: str,
 ) -> str:
-    """Execute a real Stripe transfer to a connected account."""
+    """Execute a real Stripe transfer to a connected account only when admitted."""
+    if not LIVE_EXECUTION_ADMISSION_IMPLEMENTED:
+        raise RuntimeError(
+            "Live Stripe transfer denied: signed execution-admission verification "
+            "is not implemented. Mock mode remains available; no live transfer was attempted."
+        )
     import stripe
     transfer = stripe.Transfer.create(
         amount=amount_cents,
