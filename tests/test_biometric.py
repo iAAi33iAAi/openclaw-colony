@@ -23,6 +23,8 @@ import os
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -515,7 +517,7 @@ class TestGate0Verification:
         finally:
             db.close()
 
-    def test_atomic_claim_allows_only_one_success_across_sessions(self):
+    def test_atomic_claim_allows_only_one_success_under_concurrent_claims(self):
         setup_db = SessionLocal()
         try:
             member = _make_member(setup_db)
@@ -524,19 +526,29 @@ class TestGate0Verification:
         finally:
             setup_db.close()
 
-        claimant_a = SessionLocal()
-        claimant_b = SessionLocal()
-        try:
-            first_ok, first_reason = _claim_attestation_once(claimant_a, token_id)
-            second_ok, second_reason = _claim_attestation_once(claimant_b, token_id)
+        start_together = Barrier(2)
 
-            assert first_ok is True
-            assert first_reason == "OK"
-            assert second_ok is False
-            assert "GATE0_REPLAYED" in second_reason
-        finally:
-            claimant_a.close()
-            claimant_b.close()
+        def claim_from_independent_session():
+            db = SessionLocal()
+            try:
+                start_together.wait(timeout=5)
+                return _claim_attestation_once(db, token_id)
+            finally:
+                db.close()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(claim_from_independent_session),
+                pool.submit(claim_from_independent_session),
+            ]
+            results = [future.result(timeout=10) for future in futures]
+
+        # Exactly one claim must succeed. A loser may observe the consumed row,
+        # or fail closed on database contention; two successes are never allowed.
+        assert sum(1 for ok, _ in results if ok) == 1
+        assert sum(1 for ok, reason in results if not ok and (
+            "GATE0_REPLAYED" in reason or "GATE0_CLAIM_FAILED" in reason
+        )) == 1
 
     def test_suspended_member_token_fails(self):
         db = SessionLocal()
