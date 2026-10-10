@@ -23,6 +23,8 @@ import os
 import sys
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
@@ -46,6 +48,7 @@ from biometric import (
     enroll_member,
     issue_attestation,
     verify_attestation_token,
+    _claim_attestation_once,
     record_accountability,
     get_actor_history,
     export_legal_package,
@@ -513,6 +516,39 @@ class TestGate0Verification:
             assert "GATE0_REPLAYED" in reason2
         finally:
             db.close()
+
+    def test_atomic_claim_allows_only_one_success_under_concurrent_claims(self):
+        setup_db = SessionLocal()
+        try:
+            member = _make_member(setup_db)
+            token = _issue(setup_db, member)
+            token_id = token["token_id"]
+        finally:
+            setup_db.close()
+
+        start_together = Barrier(2)
+
+        def claim_from_independent_session():
+            db = SessionLocal()
+            try:
+                start_together.wait(timeout=5)
+                return _claim_attestation_once(db, token_id)
+            finally:
+                db.close()
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [
+                pool.submit(claim_from_independent_session),
+                pool.submit(claim_from_independent_session),
+            ]
+            results = [future.result(timeout=10) for future in futures]
+
+        # Exactly one claim must succeed. A loser may observe the consumed row,
+        # or fail closed on database contention; two successes are never allowed.
+        assert sum(1 for ok, _ in results if ok) == 1
+        assert sum(1 for ok, reason in results if not ok and (
+            "GATE0_REPLAYED" in reason or "GATE0_CLAIM_FAILED" in reason
+        )) == 1
 
     def test_suspended_member_token_fails(self):
         db = SessionLocal()

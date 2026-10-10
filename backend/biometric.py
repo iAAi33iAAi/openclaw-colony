@@ -530,11 +530,41 @@ def verify_attestation_token(
                     member.legal_name)
         # Still passes Gate 0 — duress is handled at execution time
 
-    # Mark token as used
-    att.used = True
-    db.commit()
+    # Atomically consume the token. A prior SELECT followed by an ORM assignment
+    # is not a portable single-use claim: two workers may both read used=False.
+    # The conditional UPDATE is the claim operation; only one caller may change
+    # the row from unused to used. Database/locking failures deny the action.
+    claimed, claim_reason = _claim_attestation_once(db, token_id)
+    if not claimed:
+        return False, claim_reason
 
     return True, "OK"
+
+
+def _claim_attestation_once(db: Session, token_id: str) -> tuple[bool, str]:
+    """Atomically mark one attestation as used, failing closed on contention."""
+    try:
+        claimed = (
+            db.query(BiometricAttestation)
+            .filter(
+                BiometricAttestation.token_id == token_id,
+                BiometricAttestation.used.is_(False),
+            )
+            .update(
+                {BiometricAttestation.used: True},
+                synchronize_session=False,
+            )
+        )
+        if claimed != 1:
+            db.rollback()
+            return False, "GATE0_REPLAYED: Token has already been used or claimed."
+
+        db.commit()
+        return True, "OK"
+    except Exception:
+        db.rollback()
+        log.exception("[GATE0] Atomic attestation claim failed; rejecting token.")
+        return False, "GATE0_CLAIM_FAILED: Unable to consume attestation token safely."
 
 
 # ── Accountability recording ──────────────────────────────────────────────────
