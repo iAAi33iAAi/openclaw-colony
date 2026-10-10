@@ -46,6 +46,7 @@ from biometric import (
     enroll_member,
     issue_attestation,
     verify_attestation_token,
+    _claim_attestation_once,
     record_accountability,
     get_actor_history,
     export_legal_package,
@@ -513,6 +514,29 @@ class TestGate0Verification:
             assert "GATE0_REPLAYED" in reason2
         finally:
             db.close()
+
+    def test_atomic_claim_allows_only_one_success_across_sessions(self):
+        setup_db = SessionLocal()
+        try:
+            member = _make_member(setup_db)
+            token = _issue(setup_db, member)
+            token_id = token["token_id"]
+        finally:
+            setup_db.close()
+
+        claimant_a = SessionLocal()
+        claimant_b = SessionLocal()
+        try:
+            first_ok, first_reason = _claim_attestation_once(claimant_a, token_id)
+            second_ok, second_reason = _claim_attestation_once(claimant_b, token_id)
+
+            assert first_ok is True
+            assert first_reason == "OK"
+            assert second_ok is False
+            assert "GATE0_REPLAYED" in second_reason
+        finally:
+            claimant_a.close()
+            claimant_b.close()
 
     def test_suspended_member_token_fails(self):
         db = SessionLocal()
