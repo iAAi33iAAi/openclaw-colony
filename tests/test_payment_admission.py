@@ -75,6 +75,25 @@ def test_expired_admission_is_rejected(monkeypatch):
     assert "expired" in reason
 
 
+def test_admission_ttl_must_be_an_integer(monkeypatch):
+    _configure_live(monkeypatch)
+    claims = payments.build_payment_admission_claims("task-ttl", "1" * 64)
+    for ttl in (True, False, 1.0, 30.0):
+        with pytest.raises(ValueError, match="TTL must be an integer"):
+            issue_execution_admission(_approved_result(), claims, ttl_seconds=ttl)
+
+
+def test_admission_is_expired_at_exact_expiry_second(monkeypatch):
+    _configure_live(monkeypatch)
+    claims = payments.build_payment_admission_claims("task-expiry", "2" * 64)
+    receipt = issue_execution_admission(
+        _approved_result(), claims, now_epoch=1000, ttl_seconds=10
+    )
+    valid, reason = verify_execution_admission(receipt, claims, now_epoch=1010)
+    assert valid is False
+    assert "expired" in reason
+
+
 def test_live_payment_fails_closed_without_admission(monkeypatch):
     _configure_live(monkeypatch)
     called = []
