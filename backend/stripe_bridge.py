@@ -55,8 +55,11 @@ def validate_payment_mode() -> None:
             "crew": STRIPE_CREW_ACCOUNT,
             "architect": STRIPE_ARCHITECT_ACCOUNT,
         }
-        invalid = [name for name, account in accounts.items()
-                   if not isinstance(account, str) or not account.startswith("acct_")]
+        invalid = [
+            name for name, account in accounts.items()
+            if not isinstance(account, str)
+            or re.fullmatch(r"acct_[A-Za-z0-9]{6,}", account) is None
+        ]
         if invalid:
             raise RuntimeError(
                 "Live Stripe transfers require valid connected account IDs for: "
