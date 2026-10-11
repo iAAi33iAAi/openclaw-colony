@@ -30,37 +30,16 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Reject tracked environment files except documented templates
-        shell: bash
-        run: |
-          python - <<'PY'
-          import subprocess
-          import sys
-          from pathlib import PurePosixPath
-
-          tracked = subprocess.check_output(
-              ["git", "ls-files", "-z"], text=False
-          ).decode("utf-8", errors="strict").split("\\0")
-          bad = []
-          for item in tracked:
-              if not item:
-                  continue
-              name = PurePosixPath(item).name
-              if name == ".env" or name.startswith(".env."):
-                  if name.endswith(".example"):
-                      continue
-                  bad.append(item)
-          if bad:
-              print("Refusing tracked local environment/secret files:")
-              print("\\n".join(f"  - {path}" for path in bad))
-              sys.exit(1)
-          print("No tracked local environment files; example templates are allowed.")
-          PY
-
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Test tracked environment-file guard
+        run: python scripts/test_tracked_env_files.py
+
+      - name: Reject tracked environment files except documented templates
+        run: python scripts/check_tracked_env_files.py
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
