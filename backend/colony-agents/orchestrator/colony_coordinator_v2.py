@@ -65,7 +65,7 @@ class ColonyTask:
     submitted_at:     str  = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    human_consent:    bool = True
+    human_consent:    bool = False
     biometric_token:  Optional[dict] = None   # Gate 0 attestation token
     action_type:      str  = "proposal"       # scope verified against token
 
@@ -85,6 +85,27 @@ class ColonyResult:
     timestamp:        str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+
+
+# ── Approval policy ───────────────────────────────────────────────────────────
+
+def _approval_required_from_env() -> bool:
+    """Allow optional approval only in explicit development/test environments."""
+    environment = os.environ.get("COLONY_ENV", "").strip().lower()
+    setting = os.environ.get("COLONY_APPROVAL_REQUIRED", "").strip().lower()
+    enabled_values = {"true", "1", "yes", "on"}
+
+    if environment in {"development", "test"}:
+        return setting in enabled_values
+
+    # Staging/production and unspecified environments fail closed. A false,
+    # missing, or malformed setting must never silently remove the approval step.
+    if setting not in enabled_values:
+        log.error(
+            "COLONY_APPROVAL_REQUIRED is not explicitly enabled outside development/test; "
+            "forcing pending approval."
+        )
+    return True
 
 
 # ── Coordinator ───────────────────────────────────────────────────────────────
@@ -117,6 +138,21 @@ class ColonyCoordinator:
 
     async def process(self, task: ColonyTask, *, approval_override: bool = False) -> ColonyResult:
         log.info("Processing task %s: %r", task.task_id, task.prompt[:80])
+
+        # Dataclass annotations are not runtime guards. Ambiguous consent must
+        # become denial, never truthy approval.
+        if type(task.human_consent) is not bool:
+            log.error("Invalid human_consent type for task %s; forcing consent=False.", task.task_id)
+            task.human_consent = False
+
+        environment = os.environ.get("COLONY_ENV", "").strip().lower()
+        effective_approval_override = (
+            type(approval_override) is bool
+            and approval_override is True
+            and environment in {"development", "test"}
+        )
+        if approval_override and not effective_approval_override:
+            log.error("Ignoring approval override outside explicit development/test mode.")
 
         # 1 — Parallel agent evaluation
         agent_outputs = await self._run_agents(task)
@@ -169,8 +205,8 @@ class ColonyCoordinator:
         payment_info     = None
 
         approval_status = None
-        approval_required = os.getenv("COLONY_APPROVAL_REQUIRED", "false").lower() == "true"
-        if aethel_result["verdict"] == "APPROVED" and approval_required and not approval_override:
+        approval_required = _approval_required_from_env()
+        if aethel_result["verdict"] == "APPROVED" and approval_required and not effective_approval_override:
             db = SessionLocal()
             try:
                 db.add(ApprovalRecord(
@@ -346,7 +382,7 @@ class ColonyCoordinator:
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy.orm import Session
@@ -395,7 +431,7 @@ app.include_router(biometric_router)
 
 class TaskRequest(BaseModel):
     prompt:           str
-    human_consent:    bool = True
+    human_consent:    StrictBool = False
     biometric_token:  Optional[dict] = None   # Gate 0 attestation token
     action_type:      str  = "proposal"
 
