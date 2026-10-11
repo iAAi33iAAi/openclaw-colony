@@ -70,6 +70,28 @@ def test_scanner_signature_authenticates_liveness_and_body(monkeypatch):
     assert exc.value.status_code == 401
 
 
+def test_attest_request_rejects_nonfinite_liveness_scores():
+    from pydantic import ValidationError
+
+    for score in (float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ValidationError):
+            _request(liveness_score=score)
+
+
+def test_placeholder_scanner_secret_is_not_accepted(monkeypatch):
+    placeholder = "replace-with-" + ("x" * 40)
+    monkeypatch.setenv("COLONY_SCANNER_KEYS", json.dumps({"scanner-001": placeholder}))
+    req = _request()
+    with pytest.raises(HTTPException) as exc:
+        routes._verify_scanner_signature(
+            req,
+            str(int(time.time())),
+            "nonce-placeholder-check-0001",
+            "0" * 64,
+        )
+    assert exc.value.status_code == 401
+
+
 def test_scanner_signature_rejects_expired_timestamp(monkeypatch):
     secret = "scanner-test-secret-" + ("x" * 40)
     monkeypatch.setenv("COLONY_SCANNER_KEYS", json.dumps({"scanner-001": secret}))
