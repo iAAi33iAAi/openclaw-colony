@@ -112,6 +112,7 @@ try:
                 for name in ("tool_dispatcher", "os_control", "agent_designer",
                              "knowledge_base", "axiom_manager", "search_engine")
             ),
+            "working_directory_isolated": Path.cwd().resolve() != source,
         }
 
     def _dispatch_is_closed(state):
@@ -125,6 +126,7 @@ try:
             and state["axiom_manager_enabled"] is False
             and state["os_control_enabled"] is False
             and state["execution_modules_blocked"] is True
+            and state["working_directory_isolated"] is True
         )
 
     _close_dispatch_controls(memory)
@@ -416,5 +418,9 @@ class CAIOSAdapter:
                 "stdout_hash": hashlib.sha256(proc.stdout.encode()).hexdigest(),
                 "tool_dispatch_enabled": payload.get("tool_dispatch_enabled", True),
                 "advisory_controls": payload.get("advisory_controls", {}),
+                "working_directory_isolated": (
+                    payload.get("advisory_controls", {}).get("working_directory_isolated", False)
+                    if isinstance(payload.get("advisory_controls"), dict) else False
+                ),
             },
         }
