@@ -33,7 +33,12 @@ from db import (
 )
 from auth import get_current_key, require_admin
 from rate_limit import limiter, RATE_PROCESS, RATE_ADMIN, RATE_WEBHOOK
-from stripe_bridge import process_manna_payment, MOCK_MODE
+from stripe_bridge import (
+    process_manna_payment,
+    build_payment_admission_claims,
+    MOCK_MODE,
+)
+from execution_admission import issue_execution_admission
 from federation import (
     init_federation_tables, federation_sync_loop,
     NODE_ID, NODE_URL, PEER_URLS,
@@ -215,8 +220,26 @@ class ColonyCoordinator:
 
             log.info("[APPROVED] Lineage hash: %s", lineage_hash)
 
-            # 5 — Stripe MANNA split
-            payment = process_manna_payment(task.task_id, lineage_hash)
+            # 5 — Stripe MANNA split.
+            # In live mode, the payment rail requires a fresh signed receipt
+            # bound to this exact APPROVED AETHEL result, task, lineage, split,
+            # and connected-account destinations. Failure to issue it means
+            # process_manna_payment returns a failed/no-transfer result.
+            admission_receipt = None
+            if not MOCK_MODE:
+                try:
+                    claims = build_payment_admission_claims(task.task_id, lineage_hash)
+                    admission_receipt = issue_execution_admission(aethel_result, claims)
+                except Exception as exc:
+                    log.error(
+                        "[MANNA] Execution-admission receipt not issued; live transfer will be denied (%s).",
+                        type(exc).__name__,
+                    )
+            payment = process_manna_payment(
+                task.task_id,
+                lineage_hash,
+                admission_receipt=admission_receipt,
+            )
             payment_info = payment.as_dict()
 
             # 6 — Persist payment record
