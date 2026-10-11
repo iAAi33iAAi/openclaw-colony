@@ -16,13 +16,18 @@ FastAPI router exposing:
 
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
+import os
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Header
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from db import get_db
@@ -64,10 +69,12 @@ class EnrollRequest(BaseModel):
 
 
 class AttestRequest(BaseModel):
+    # These fields are accepted only when covered by the authenticated scanner signature.
+    scanner_id: str = Field(min_length=1, max_length=128)
     badge_serial: str
     face_scan_hex: str
     retina_scan_hex: str
-    liveness_score: float
+    liveness_score: float = Field(ge=0.0, le=1.0)
     location_node: str
     action_type: str = "proposal"
 
@@ -139,16 +146,130 @@ def enroll(
 
 # ── Attestation issuance ──────────────────────────────────────────────────────
 
+SCANNER_CLOCK_SKEW_SECONDS = 30
+
+
+def _scanner_keys() -> dict[str, str]:
+    """Load per-device HMAC keys from COLONY_SCANNER_KEYS JSON configuration."""
+    raw = os.environ.get("COLONY_SCANNER_KEYS", "")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        log.error("[BIOMETRIC][SCANNER] COLONY_SCANNER_KEYS is not valid JSON.")
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        scanner_id: secret
+        for scanner_id, secret in data.items()
+        if isinstance(scanner_id, str)
+        and scanner_id
+        and isinstance(secret, str)
+        and len(secret) >= 32
+    }
+
+
+def _attestation_body(req: AttestRequest) -> dict:
+    """Return the exact JSON body signed by scanner firmware/service."""
+    if hasattr(req, "model_dump"):
+        return req.model_dump()
+    return req.dict()
+
+
+def _scanner_signature_message(
+    req: AttestRequest, timestamp: str, nonce: str
+) -> bytes:
+    body = json.dumps(
+        _attestation_body(req),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+    return f"{timestamp}\\n{nonce}\\n{body}".encode("utf-8")
+
+
+def _verify_scanner_signature(
+    req: AttestRequest,
+    timestamp: str,
+    nonce: str,
+    signature: str,
+    *,
+    now_epoch: int | None = None,
+) -> None:
+    """Authenticate scanner identity, signed liveness claim, freshness and request shape."""
+    if not timestamp.isdigit():
+        raise HTTPException(status_code=401, detail="Scanner authentication failed.")
+    if not nonce or len(nonce) < 16 or len(nonce) > 128:
+        raise HTTPException(status_code=401, detail="Scanner authentication failed.")
+    if len(signature) != 64:
+        raise HTTPException(status_code=401, detail="Scanner authentication failed.")
+
+    issued = int(timestamp)
+    now = int(time.time()) if now_epoch is None else int(now_epoch)
+    if abs(now - issued) > SCANNER_CLOCK_SKEW_SECONDS:
+        raise HTTPException(status_code=401, detail="Scanner authentication failed.")
+
+    keys = _scanner_keys()
+    secret = keys.get(req.scanner_id)
+    if secret is None:
+        raise HTTPException(status_code=401, detail="Scanner authentication failed.")
+
+    expected = hmac.new(
+        secret.encode("utf-8"),
+        _scanner_signature_message(req, timestamp, nonce),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, signature.lower()):
+        raise HTTPException(status_code=401, detail="Scanner authentication failed.")
+
+
+def _consume_scanner_nonce(db: Session, req: AttestRequest, timestamp: str, nonce: str) -> None:
+    """Persist nonce before issuing a token so a signed HTTP request is single-use."""
+    from biometric import ScannerRequestNonce
+
+    db.add(ScannerRequestNonce(
+        nonce=nonce,
+        scanner_id=req.scanner_id,
+        signed_timestamp=int(timestamp),
+    ))
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Scanner request was already used.")
+    except Exception:
+        db.rollback()
+        log.exception("[BIOMETRIC][SCANNER] Could not persist replay guard.")
+        raise HTTPException(status_code=503, detail="Scanner verification is temporarily unavailable.")
+
+
 @router.post("/attest")
 def attest(
     req: AttestRequest,
     db: Session = Depends(get_db),
+    x_scanner_timestamp: str = Header(default="", alias="X-Scanner-Timestamp"),
+    x_scanner_nonce: str = Header(default="", alias="X-Scanner-Nonce"),
+    x_scanner_signature: str = Header(default="", alias="X-Scanner-Signature"),
 ):
     """
-    Called by the physical scanner after capturing biometrics.
-    Returns a 90-second signed attestation token.
-    No admin key required — scanner hardware authenticates via network isolation.
+    Issue a short-lived attestation only for an authenticated scanner request.
+
+    The scanner HMAC covers every body field, including liveness_score, plus a
+    timestamp and single-use nonce. Configure COLONY_SCANNER_KEYS as a JSON map
+    from scanner_id to a unique secret kept only by the scanner and server.
+    Network isolation alone is not an authentication mechanism.
     """
+    _verify_scanner_signature(
+        req,
+        x_scanner_timestamp,
+        x_scanner_nonce,
+        x_scanner_signature,
+    )
+    _consume_scanner_nonce(db, req, x_scanner_timestamp, x_scanner_nonce)
+
     try:
         token = issue_attestation(
             db=db,
@@ -163,8 +284,7 @@ def attest(
         safe_token = {k: v for k, v in token.items() if k != "duress_triggered"}
         return {"status": "issued", "token": safe_token}
     except ValueError as e:
-        # Return generic error — do not reveal which check failed
-        log.warning("[BIOMETRIC][ATTEST] Attestation failed: %s", e)
+        log.warning("[BIOMETRIC][ATTEST] Attestation failed.")
         raise HTTPException(
             status_code=401,
             detail="Biometric verification failed. Access denied.",
