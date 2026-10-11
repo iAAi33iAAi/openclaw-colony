@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 import textwrap
 import uuid
 from pathlib import Path
@@ -35,67 +36,139 @@ _CHILD = r'''
 import json
 import re
 import sys
+import types
 from pathlib import Path
 
 source = Path(sys.argv[1]).resolve()
 prompt = sys.argv[2]
 sys.path.insert(0, str(source))
 
+
+def _disabled_module(name, **attributes):
+    module = types.ModuleType(name)
+    for key, value in attributes.items():
+        setattr(module, key, value)
+    return module
+
+
+def _disable_import(name):
+    # A None entry makes import fail with ModuleNotFoundError. CAIOS treats
+    # these features as optional; this prevents their module-level startup code
+    # from running before the adapter can disable runtime dispatch.
+    sys.modules[name] = None
+
+
+class _DisabledMeshCoordinator:
+    def __init__(self, *args, **kwargs):
+        self.disabled = True
+
+
 try:
-    # An advisory request is not allowed to invoke CAIOS command/update APIs.
+    # Reject mutating commands before importing the external runtime.
     if prompt.lstrip().startswith("/"):
         raise ValueError("CAIOS advisory mode does not accept command-prefixed prompts")
     if re.search(r"(?<![\w])#UPDATE(?![\w])", prompt, re.IGNORECASE):
         raise ValueError("CAIOS advisory mode does not accept knowledge-update commands")
 
+    # Prevent external side-effect modules from initializing at import time.
+    # The shared memory dispatch path is additionally inspected after startup.
+    for module_name in (
+        "tool_dispatcher",
+        "os_control",
+        "agent_designer",
+        "knowledge_base",
+        "axiom_manager",
+        "search_engine",
+    ):
+        _disable_import(module_name)
+
     import orchestrator as caios
     memory = getattr(caios, "shared_memory", {})
     if not isinstance(memory, dict):
-        memory = {}
+        raise RuntimeError("CAIOS shared_memory is not an object")
 
-    # Keep the CAIOS reasoning pipeline, but disable action dispatch and
-    # automatic specialist deployment for this advisory-only call.
-    memory["tool_dispatcher"] = None
-    memory["tool_addendum"] = ""
-    memory["searcher"] = None
-    if hasattr(caios, "AD_AVAILABLE"):
-        caios.AD_AVAILABLE = False
+    def _close_dispatch_controls(target):
+        target["tool_dispatcher"] = None
+        target["tool_addendum"] = ""
+        target["searcher"] = None
+        target["os_controller"] = None
+        target["available_tools"] = []
+        target["action_dispatch_enabled"] = False
+        target["self_extension_enabled"] = False
+
+    def _dispatch_state(target, module):
+        return {
+            "tool_dispatcher_present": target.get("tool_dispatcher") is not None,
+            "tool_addendum_present": bool(target.get("tool_addendum")),
+            "searcher_present": target.get("searcher") is not None,
+            "os_controller_present": target.get("os_controller") is not None,
+            "available_tool_count": len(target.get("available_tools", []))
+                if isinstance(target.get("available_tools"), list) else -1,
+            "agent_designer_enabled": bool(getattr(module, "AD_AVAILABLE", False)),
+            "axiom_manager_enabled": bool(getattr(module, "AMGR_AVAILABLE", False)),
+            "os_control_enabled": bool(getattr(module, "OSC_AVAILABLE", False)),
+            "execution_modules_blocked": all(
+                sys.modules.get(name) is None
+                for name in ("tool_dispatcher", "os_control", "agent_designer",
+                             "knowledge_base", "axiom_manager", "search_engine")
+            ),
+        }
+
+    def _dispatch_is_closed(state):
+        return (
+            state["tool_dispatcher_present"] is False
+            and state["tool_addendum_present"] is False
+            and state["searcher_present"] is False
+            and state["os_controller_present"] is False
+            and state["available_tool_count"] == 0
+            and state["agent_designer_enabled"] is False
+            and state["axiom_manager_enabled"] is False
+            and state["os_control_enabled"] is False
+            and state["execution_modules_blocked"] is True
+        )
+
+    _close_dispatch_controls(memory)
+    # These toggles are checked by the pinned source's own optional paths.
+    for attribute in ("AD_AVAILABLE", "AMGR_AVAILABLE", "OSC_AVAILABLE", "MESH_AVAILABLE"):
+        if hasattr(caios, attribute):
+            setattr(caios, attribute, False)
+    if hasattr(caios, "MeshCoordinator"):
+        caios.MeshCoordinator = _DisabledMeshCoordinator
+    # Avoid a potentially side-effecting abstraction extension; a plain string
+    # response is enough for an advisory answer.
+    if hasattr(caios, "ABSTRACTION_AVAILABLE"):
+        caios.ABSTRACTION_AVAILABLE = False
+    if hasattr(caios, "create_abstraction_dispatcher"):
+        caios.create_abstraction_dispatcher = None
 
     result = None
     module_entry = getattr(caios, "handle_user_request", None)
     if callable(module_entry):
-        # Compatibility with any upstream version exposing a module function.
         result = module_entry(prompt)
     else:
-        # The pinned Project Andrew version exposes this method on a class.
         orchestrator_class = getattr(caios, "CAIOSOrchestrator", None)
         if callable(orchestrator_class):
+            node_id = str(memory.get("node_id") or "CAIOS_ADVISORY")
             try:
-                node_id = str(memory.get("node_id") or "CAIOS_ADVISORY")
-                try:
-                    node_tier = int(memory.get("node_tier", 1))
-                except (TypeError, ValueError):
-                    node_tier = 1
-                instance = orchestrator_class(
-                    node_id=node_id,
-                    node_tier=node_tier,
-                    shared_memory=memory,
-                )
-                instance_entry = getattr(instance, "handle_user_request", None)
-                if not callable(instance_entry):
-                    raise RuntimeError("CAIOSOrchestrator.handle_user_request is unavailable")
-                result = instance_entry(prompt)
-            except Exception:
-                # A module-level system_step is the fallback public request path.
-                system_step = getattr(caios, "system_step", None)
-                if not callable(system_step):
-                    raise
-                result = system_step(
-                    user_input=prompt,
-                    prompt_complexity="medium",
-                    api_clients=memory.get("api_clients"),
-                    user_id=memory.get("active_user"),
-                )
+                node_tier = int(memory.get("node_tier", 1))
+            except (TypeError, ValueError):
+                node_tier = 1
+            instance = orchestrator_class(
+                node_id=node_id,
+                node_tier=node_tier,
+                shared_memory=memory,
+            )
+            # Constructor code is outside the adapter's trust boundary, so close
+            # dispatch again immediately before running the request.
+            instance_memory = getattr(instance, "shared_memory", memory)
+            if not isinstance(instance_memory, dict):
+                raise RuntimeError("CAIOS instance has invalid shared memory")
+            _close_dispatch_controls(instance_memory)
+            entry = getattr(instance, "handle_user_request", None)
+            if not callable(entry):
+                raise RuntimeError("CAIOSOrchestrator.handle_user_request is unavailable")
+            result = entry(prompt)
+            memory = instance_memory
         else:
             system_step = getattr(caios, "system_step", None)
             if not callable(system_step):
@@ -103,9 +176,13 @@ try:
             result = system_step(
                 user_input=prompt,
                 prompt_complexity="medium",
-                api_clients=memory.get("api_clients"),
-                user_id=memory.get("active_user"),
+                api_clients={},
+                user_id=None,
             )
+
+    dispatch_state = _dispatch_state(memory, caios)
+    if not _dispatch_is_closed(dispatch_state):
+        raise RuntimeError("CAIOS re-enabled a disabled execution capability; advisory result discarded")
 
     if isinstance(result, dict):
         output = result.get("llm_response") or result.get("output") or ""
@@ -120,8 +197,19 @@ try:
         "status": "ok",
         "output": output if isinstance(output, str) else str(output),
         "cpol": cpol if isinstance(cpol, dict) else {},
-        "advisory_only": True,
-        "tool_dispatch_enabled": False,
+        "advisory_only": _dispatch_is_closed(dispatch_state),
+        "tool_dispatch_enabled": (
+            dispatch_state["tool_dispatcher_present"]
+            or dispatch_state["tool_addendum_present"]
+            or dispatch_state["searcher_present"]
+            or dispatch_state["os_controller_present"]
+            or dispatch_state["available_tool_count"] != 0
+            or dispatch_state["agent_designer_enabled"]
+            or dispatch_state["axiom_manager_enabled"]
+            or dispatch_state["os_control_enabled"]
+            or not dispatch_state["execution_modules_blocked"]
+        ),
+        "advisory_controls": dispatch_state,
     }, default=str))
 except Exception as exc:
     print(json.dumps({"status": "error", "error": str(exc)}))
@@ -242,15 +330,19 @@ class CAIOSAdapter:
         child_env["PYTHONDONTWRITEBYTECODE"] = "1"
 
         try:
-            proc = subprocess.run(
-                [sys.executable, "-c", textwrap.dedent(_CHILD), str(self.source_path), prompt],
-                cwd=str(self.source_path),
-                env=child_env,
-                text=True,
-                capture_output=True,
-                timeout=self.timeout,
-                check=False,
-            )
+            # The pinned orchestrator creates relative knowledge_base/logs/agents/
+            # directories at import time. Run only in a disposable working folder,
+            # never inside the external checkout.
+            with tempfile.TemporaryDirectory(prefix="caios-advisory-") as isolated_cwd:
+                proc = subprocess.run(
+                    [sys.executable, "-c", textwrap.dedent(_CHILD), str(self.source_path), prompt],
+                    cwd=isolated_cwd,
+                    env=child_env,
+                    text=True,
+                    capture_output=True,
+                    timeout=self.timeout,
+                    check=False,
+                )
         except subprocess.TimeoutExpired:
             return {
                 "protocol": "aethel-interop/1",
@@ -323,5 +415,6 @@ class CAIOSAdapter:
                 "child_exit_code": proc.returncode,
                 "stdout_hash": hashlib.sha256(proc.stdout.encode()).hexdigest(),
                 "tool_dispatch_enabled": payload.get("tool_dispatch_enabled", True),
+                "advisory_controls": payload.get("advisory_controls", {}),
             },
         }
