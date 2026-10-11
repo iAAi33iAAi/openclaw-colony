@@ -20,6 +20,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import time
 from datetime import datetime, timezone
@@ -74,7 +75,7 @@ class AttestRequest(BaseModel):
     badge_serial: str
     face_scan_hex: str
     retina_scan_hex: str
-    liveness_score: float = Field(ge=0.0, le=1.0)
+    liveness_score: float = Field(ge=0.0, le=1.0, allow_inf_nan=False)
     location_node: str
     action_type: str = "proposal"
 
@@ -161,6 +162,7 @@ def _scanner_keys() -> dict[str, str]:
         return {}
     if not isinstance(data, dict):
         return {}
+    placeholders = ("replace-with", "change-me", "changeme", "placeholder", "example", "<", ">", "...")
     return {
         scanner_id: secret
         for scanner_id, secret in data.items()
@@ -168,6 +170,7 @@ def _scanner_keys() -> dict[str, str]:
         and scanner_id
         and isinstance(secret, str)
         and len(secret) >= 32
+        and not any(marker in secret.lower() for marker in placeholders)
     }
 
 
@@ -200,6 +203,13 @@ def _verify_scanner_signature(
     now_epoch: int | None = None,
 ) -> None:
     """Authenticate scanner identity, signed liveness claim, freshness and request shape."""
+    if (
+        isinstance(req.liveness_score, bool)
+        or not isinstance(req.liveness_score, (int, float))
+        or not math.isfinite(req.liveness_score)
+        or not 0.0 <= req.liveness_score <= 1.0
+    ):
+        raise HTTPException(status_code=401, detail="Scanner authentication failed.")
     if not timestamp.isdigit():
         raise HTTPException(status_code=401, detail="Scanner authentication failed.")
     if not nonce or len(nonce) < 16 or len(nonce) > 128:
