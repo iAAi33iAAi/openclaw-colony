@@ -28,6 +28,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import secrets
 import uuid
@@ -72,8 +73,13 @@ BAS_SECRET: str = _bas_secret_raw
 # Token lifetime in seconds (90 seconds — cannot be replayed)
 ATTESTATION_TTL = int(os.environ.get("COLONY_ATTESTATION_TTL", "90"))
 
-# Minimum liveness score to accept (0.0–1.0)
-LIVENESS_THRESHOLD = float(os.environ.get("COLONY_LIVENESS_THRESHOLD", "0.95"))
+# Minimum liveness score to accept (0.0–1.0). Invalid policy values stop startup.
+try:
+    LIVENESS_THRESHOLD = float(os.environ.get("COLONY_LIVENESS_THRESHOLD", "0.95"))
+except ValueError as exc:
+    raise RuntimeError("COLONY_LIVENESS_THRESHOLD must be a finite number in [0, 1].") from exc
+if not math.isfinite(LIVENESS_THRESHOLD) or not 0.0 <= LIVENESS_THRESHOLD <= 1.0:
+    raise RuntimeError("COLONY_LIVENESS_THRESHOLD must be a finite number in [0, 1].")
 
 # Cooling-off windows by MANNA amount
 COOLING_OFF_RULES = [
@@ -118,6 +124,17 @@ class ColonyMember(Base):
     # Last known location (updated on each scan)
     last_seen_node    = Column(String(64), nullable=True)
     last_seen_at      = Column(DateTime, nullable=True)
+
+
+class ScannerRequestNonce(Base):
+    """Persistent replay guard for signed scanner requests."""
+    __tablename__ = "scanner_request_nonces"
+    __table_args__ = {"extend_existing": True}
+
+    nonce = Column(String(128), primary_key=True)
+    scanner_id = Column(String(128), nullable=False, index=True)
+    signed_timestamp = Column(Integer, nullable=False)
+    received_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
 
 class BiometricAttestation(Base):
@@ -346,7 +363,14 @@ def issue_attestation(
     if member.suspended:
         raise ValueError(f"Member {member.member_id} is suspended.")
 
-    # 2. Liveness check
+    # 2. Liveness check. NaN must never pass by making every comparison false.
+    if (
+        isinstance(liveness_score, bool)
+        or not isinstance(liveness_score, (int, float))
+        or not math.isfinite(liveness_score)
+        or not 0.0 <= liveness_score <= 1.0
+    ):
+        raise ValueError("Liveness score must be a finite number in [0.0, 1.0].")
     if liveness_score < LIVENESS_THRESHOLD:
         raise ValueError(
             f"Liveness score {liveness_score:.3f} below threshold {LIVENESS_THRESHOLD}."
