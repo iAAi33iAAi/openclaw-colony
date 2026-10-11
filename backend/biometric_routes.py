@@ -191,7 +191,7 @@ def _scanner_signature_message(
         ensure_ascii=True,
         allow_nan=False,
     )
-    return f"{timestamp}\\n{nonce}\\n{body}".encode("utf-8")
+    return (timestamp + chr(10) + nonce + chr(10) + body).encode("utf-8")
 
 
 def _verify_scanner_signature(
