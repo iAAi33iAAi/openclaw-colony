@@ -33,7 +33,12 @@ from db import (
 )
 from auth import get_current_key, require_admin
 from rate_limit import limiter, RATE_PROCESS, RATE_ADMIN, RATE_WEBHOOK
-from stripe_bridge import process_manna_payment, MOCK_MODE
+from stripe_bridge import (
+    process_manna_payment,
+    build_payment_admission_claims,
+    MOCK_MODE,
+)
+from execution_admission import issue_execution_admission
 from federation import (
     init_federation_tables, federation_sync_loop,
     NODE_ID, NODE_URL, PEER_URLS,
@@ -60,7 +65,7 @@ class ColonyTask:
     submitted_at:     str  = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    human_consent:    bool = True
+    human_consent:    bool = False
     biometric_token:  Optional[dict] = None   # Gate 0 attestation token
     action_type:      str  = "proposal"       # scope verified against token
 
@@ -80,6 +85,36 @@ class ColonyResult:
     timestamp:        str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
+
+
+# ── Approval policy ───────────────────────────────────────────────────────────
+
+def _approval_required_from_env() -> bool:
+    """Allow optional approval only in explicit development/test environments."""
+    environment = os.environ.get("COLONY_ENV", "").strip().lower()
+    setting = os.environ.get("COLONY_APPROVAL_REQUIRED", "").strip().lower()
+    enabled_values = {"true", "1", "yes", "on"}
+
+    if environment in {"development", "test"}:
+        return setting in enabled_values
+
+    # Staging/production and unspecified environments fail closed. A false,
+    # missing, or malformed setting must never silently remove the approval step.
+    if setting not in enabled_values:
+        log.error(
+            "COLONY_APPROVAL_REQUIRED is not explicitly enabled outside development/test; "
+            "forcing pending approval."
+        )
+    return True
+
+
+def _approval_override_allowed(value: Any) -> bool:
+    """A bypass is honored only for an actual boolean in explicit dev/test mode."""
+    environment = os.environ.get("COLONY_ENV", "").strip().lower()
+    allowed = type(value) is bool and value is True and environment in {"development", "test"}
+    if value and not allowed:
+        log.error("Ignoring approval override outside explicit development/test mode.")
+    return allowed
 
 
 # ── Coordinator ───────────────────────────────────────────────────────────────
@@ -112,6 +147,14 @@ class ColonyCoordinator:
 
     async def process(self, task: ColonyTask, *, approval_override: bool = False) -> ColonyResult:
         log.info("Processing task %s: %r", task.task_id, task.prompt[:80])
+
+        # Dataclass annotations are not runtime guards. Ambiguous consent must
+        # become denial, never truthy approval.
+        if type(task.human_consent) is not bool:
+            log.error("Invalid human_consent type for task %s; forcing consent=False.", task.task_id)
+            task.human_consent = False
+
+        effective_approval_override = _approval_override_allowed(approval_override)
 
         # 1 — Parallel agent evaluation
         agent_outputs = await self._run_agents(task)
@@ -164,8 +207,8 @@ class ColonyCoordinator:
         payment_info     = None
 
         approval_status = None
-        approval_required = os.getenv("COLONY_APPROVAL_REQUIRED", "false").lower() == "true"
-        if aethel_result["verdict"] == "APPROVED" and approval_required and not approval_override:
+        approval_required = _approval_required_from_env()
+        if aethel_result["verdict"] == "APPROVED" and approval_required and not effective_approval_override:
             db = SessionLocal()
             try:
                 db.add(ApprovalRecord(
@@ -215,8 +258,26 @@ class ColonyCoordinator:
 
             log.info("[APPROVED] Lineage hash: %s", lineage_hash)
 
-            # 5 — Stripe MANNA split
-            payment = process_manna_payment(task.task_id, lineage_hash)
+            # 5 — Stripe MANNA split.
+            # In live mode, the payment rail requires a fresh signed receipt
+            # bound to this exact APPROVED AETHEL result, task, lineage, split,
+            # and connected-account destinations. Failure to issue it means
+            # process_manna_payment returns a failed/no-transfer result.
+            admission_receipt = None
+            if not MOCK_MODE:
+                try:
+                    claims = build_payment_admission_claims(task.task_id, lineage_hash)
+                    admission_receipt = issue_execution_admission(aethel_result, claims)
+                except Exception as exc:
+                    log.error(
+                        "[MANNA] Execution-admission receipt not issued; live transfer will be denied (%s).",
+                        type(exc).__name__,
+                    )
+            payment = process_manna_payment(
+                task.task_id,
+                lineage_hash,
+                admission_receipt=admission_receipt,
+            )
             payment_info = payment.as_dict()
 
             # 6 — Persist payment record
@@ -323,7 +384,7 @@ class ColonyCoordinator:
 from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPAuthorizationCredentials
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
 from sqlalchemy.orm import Session
@@ -372,7 +433,7 @@ app.include_router(biometric_router)
 
 class TaskRequest(BaseModel):
     prompt:           str
-    human_consent:    bool = True
+    human_consent:    StrictBool = False
     biometric_token:  Optional[dict] = None   # Gate 0 attestation token
     action_type:      str  = "proposal"
 

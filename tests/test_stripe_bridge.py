@@ -507,6 +507,48 @@ class TestFastAPIEndpoints:
         assert data["lineage_hash"] == "a" * 64
         assert data["payment"]["status"] == "mock"
 
+    def test_missing_consent_defaults_to_false_and_is_forwarded(self):
+        request_model = self.cc.TaskRequest(prompt="consent omitted")
+        assert request_model.human_consent is False
+
+        response = self.client.post("/process", json={"prompt": "consent omitted"})
+        assert response.status_code == 200
+        task = self.cc.coordinator.process.call_args.args[0]
+        assert task.human_consent is False
+
+        direct_task = self.cc.ColonyTask(prompt="consent omitted")
+        assert direct_task.human_consent is False
+
+    def test_string_consent_is_rejected(self):
+        response = self.client.post(
+            "/process",
+            json={"prompt": "string consent is not a boolean", "human_consent": "false"},
+        )
+        assert response.status_code == 422
+
+    def test_production_requires_explicit_admin_approval(self, monkeypatch):
+        monkeypatch.setenv("COLONY_ENV", "production")
+        for setting in ("false", "0", "no", "off", "", "not-a-boolean"):
+            monkeypatch.setenv("COLONY_APPROVAL_REQUIRED", setting)
+            assert self.cc._approval_required_from_env() is True
+
+        monkeypatch.setenv("COLONY_ENV", "development")
+        monkeypatch.setenv("COLONY_APPROVAL_REQUIRED", "false")
+        assert self.cc._approval_required_from_env() is False
+
+    def test_approval_override_is_strict_and_development_only(self, monkeypatch):
+        monkeypatch.setenv("COLONY_ENV", "development")
+        assert self.cc._approval_override_allowed(True) is True
+        for invalid in (False, "true", "false", 1, None):
+            assert self.cc._approval_override_allowed(invalid) is False
+
+        monkeypatch.setenv("COLONY_ENV", "production")
+        assert self.cc._approval_override_allowed(True) is False
+
+        monkeypatch.setenv("COLONY_ENV", "staging")
+        assert self.cc._approval_override_allowed(True) is False
+
+
     def test_process_returns_payment_field(self):
         resp = self.client.post("/process", json={"prompt": "test", "human_consent": True})
         assert resp.status_code == 200
