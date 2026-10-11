@@ -25,7 +25,7 @@ def find_disallowed_paths(paths: Iterable[str]) -> list[str]:
 
 def tracked_paths_from_git() -> list[str]:
     """Read Git's NUL-delimited path list safely, including names containing newlines."""
-    raw = subprocess.check_output(["git", "ls-files", "-z")
+    raw = subprocess.check_output(["git", "ls-files", "-z"])
     return [os.fsdecode(path) for path in raw.split(b"\0") if path]
 
 
