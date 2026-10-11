@@ -199,7 +199,7 @@ class CAIOSAdapter:
             or (isinstance(prompt, str) and prompt.lstrip().startswith("/"))
             or (
                 isinstance(prompt, str)
-                and re.search(r"(?<![\\w])#UPDATE(?![\\w])", prompt, re.IGNORECASE) is not None
+                and re.search(r"(?<![\w])#UPDATE(?![\w])", prompt, re.IGNORECASE) is not None
             )
         )
         if prompt_is_invalid:
