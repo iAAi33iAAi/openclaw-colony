@@ -52,6 +52,24 @@ def test_scanner_auth_requires_configured_device_key(monkeypatch):
     assert exc.value.status_code == 401
 
 
+def test_scanner_signature_uses_actual_newline_delimiters():
+    req = _request()
+    timestamp = "1791686400"
+    nonce = "nonce-with-at-least-16-chars"
+    body = json.dumps(
+        routes._attestation_body(req),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    )
+    expected = (timestamp + chr(10) + nonce + chr(10) + body).encode("utf-8")
+    actual = routes._scanner_signature_message(req, timestamp, nonce)
+
+    assert actual == expected
+    assert actual.startswith(timestamp.encode("ascii") + b"\n" + nonce.encode("utf-8") + b"\n")
+
+
 def test_scanner_signature_authenticates_liveness_and_body(monkeypatch):
     secret = "scanner-test-secret-" + ("x" * 40)
     monkeypatch.setenv("COLONY_SCANNER_KEYS", json.dumps({"scanner-001": secret}))
