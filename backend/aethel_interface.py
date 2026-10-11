@@ -119,8 +119,37 @@ _BAS_SECRET_BYTES: bytes = _load_bas_secret()
 
 
 def _biometric_required() -> bool:
-    """Read env var dynamically so patch.dict works correctly in tests."""
-    return _os.environ.get("COLONY_BIOMETRIC_REQUIRED", "true").lower() == "true"
+    """Require Gate 0 unless an explicit non-production dev/test bypass is active.
+
+    COLONY_BIOMETRIC_REQUIRED=false is not sufficient by itself. The bypass is
+    permitted only when COLONY_DEV_MODE=true and COLONY_ENV is exactly
+    'development' or 'test'. Production always requires biometric enforcement.
+    Invalid configuration values fail closed by requiring Gate 0.
+    """
+    setting = _os.environ.get("COLONY_BIOMETRIC_REQUIRED", "true").strip().lower()
+    if setting in {"true", "1", "yes", "on"}:
+        return True
+
+    if setting not in {"false", "0", "no", "off"}:
+        log.error(
+            "Invalid COLONY_BIOMETRIC_REQUIRED value %r; enforcing Gate 0.",
+            setting,
+        )
+        return True
+
+    environment = _os.environ.get("COLONY_ENV", "").strip().lower()
+    dev_mode = _os.environ.get("COLONY_DEV_MODE", "false").strip().lower()
+    explicit_dev_mode = dev_mode in {"true", "1", "yes", "on"}
+    if environment in {"development", "test"} and explicit_dev_mode:
+        return False
+
+    log.error(
+        "Gate 0 bypass requested outside explicit development/test mode "
+        "(COLONY_ENV=%r, COLONY_DEV_MODE=%r); enforcing biometric verification.",
+        environment,
+        dev_mode,
+    )
+    return True
 
 # Keep module-level alias for backward compatibility (reads at import time)
 BIOMETRIC_REQUIRED = _biometric_required()
