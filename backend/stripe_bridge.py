@@ -22,9 +22,12 @@ If STRIPE_SECRET_KEY is not set, the bridge runs in MOCK mode:
 
 import logging
 import os
+import re
 import uuid
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
+
+from execution_admission import verify_execution_admission
 
 log = logging.getLogger("colony.stripe_bridge")
 
@@ -39,12 +42,35 @@ MANNA_CENTS               = int(os.environ.get("COLONY_MANNA_CENTS", "100"))
 MOCK_MODE = not bool(STRIPE_SECRET_KEY)
 
 def validate_payment_mode() -> None:
-    """Reject Stripe mock mode when the deployment declares production."""
-    if MOCK_MODE and os.environ.get("COLONY_ENV", "").lower() == "production":
+    """Fail closed on incomplete live-payment configuration."""
+    environment = os.environ.get("COLONY_ENV", "").strip().lower()
+    if MOCK_MODE and environment == "production":
         raise RuntimeError(
             "STRIPE_SECRET_KEY must be configured in production; "
             "mock MANNA transfers are not permitted."
         )
+    if not MOCK_MODE:
+        accounts = {
+            "community": STRIPE_COMMUNITY_ACCOUNT,
+            "crew": STRIPE_CREW_ACCOUNT,
+            "architect": STRIPE_ARCHITECT_ACCOUNT,
+        }
+        invalid = [name for name, account in accounts.items()
+                   if not isinstance(account, str) or not account.startswith("acct_")]
+        if invalid:
+            raise RuntimeError(
+                "Live Stripe transfers require valid connected account IDs for: "
+                + ", ".join(invalid)
+            )
+        admission_key = os.environ.get("COLONY_EXECUTION_ADMISSION_SECRET", "")
+        biometric_key = os.environ.get("COLONY_BAS_SECRET", "")
+        if len(admission_key) < 32 or (
+            biometric_key and admission_key == biometric_key
+        ):
+            raise RuntimeError(
+                "Live Stripe transfers require a distinct "
+                "COLONY_EXECUTION_ADMISSION_SECRET of at least 32 characters."
+            )
 
 
 if MOCK_MODE:
@@ -107,21 +133,64 @@ def _mock_transfer(amount_cents: int, destination: str, task_id: str, label: str
     return mock_id
 
 
+def build_payment_admission_claims(task_id: str, lineage_hash: str) -> dict[str, Any]:
+    """Build the exact values a live transfer receipt must authorize."""
+    if not isinstance(task_id, str) or not task_id.strip():
+        raise ValueError("task_id is required for payment admission.")
+    if (
+        not isinstance(lineage_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", lineage_hash) is None
+    ):
+        raise ValueError("lineage_hash must be a 64-character SHA-256 digest.")
+    split = calculate_manna_split(MANNA_CENTS)
+    return {
+        "schema": "colony-manna-payment-claims/v1",
+        "task_id": task_id,
+        "lineage_hash": lineage_hash,
+        "currency": "usd",
+        "total_cents": split.total_cents,
+        "split": split.as_dict(),
+        "destinations": {
+            "community": STRIPE_COMMUNITY_ACCOUNT,
+            "crew": STRIPE_CREW_ACCOUNT,
+            "architect": STRIPE_ARCHITECT_ACCOUNT,
+        },
+    }
+
+
 def _live_transfer(
     amount_cents: int,
     destination: str,
     task_id: str,
     label: str,
     idempotency_key: str,
+    admission_receipt: dict | None = None,
 ) -> str:
-    """Execute a real Stripe transfer to a connected account."""
+    """Execute a real transfer only when a signed admission binds this exact payment."""
+    if label not in {"community", "crew", "architect"}:
+        raise RuntimeError("Unsupported MANNA bucket.")
+    try:
+        lineage_hash = idempotency_key.rsplit("_", 1)[0]
+        expected_claims = build_payment_admission_claims(task_id, lineage_hash)
+    except (TypeError, ValueError):
+        raise RuntimeError("Payment identifiers are invalid; transfer denied.") from None
+    valid, reason = verify_execution_admission(admission_receipt, expected_claims)
+    if not valid:
+        log.error("[STRIPE] Refusing live transfer without valid AETHEL admission: %s", reason)
+        raise RuntimeError("Live transfer denied: signed AETHEL execution admission is invalid.")
+    expected_amount = expected_claims["split"].get(f"{label}_cents")
+    expected_destination = expected_claims["destinations"].get(label)
+    if amount_cents != expected_amount or destination != expected_destination:
+        log.error("[STRIPE] Transfer parameters do not match admitted %s bucket.", label)
+        raise RuntimeError("Live transfer denied: amount or destination differs from admission.")
+
     import stripe
     transfer = stripe.Transfer.create(
         amount=amount_cents,
         currency="usd",
         destination=destination,
         description=f"OpenClaw Colony MANNA — {label} — task {task_id}",
-        metadata={"task_id": task_id, "manna_bucket": label},
+        metadata={"task_id": task_id, "manna_bucket": label, "lineage_hash": lineage_hash},
         idempotency_key=idempotency_key,
     )
     log.info(
@@ -157,14 +226,30 @@ class PaymentResult:
         }
 
 
-def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
+def process_manna_payment(
+    task_id: str,
+    lineage_hash: str,
+    admission_receipt: dict | None = None,
+) -> PaymentResult:
     """
-    Trigger MANNA split for an APPROVED task.
-    Called by the coordinator immediately after lineage is committed.
-    Returns a PaymentResult regardless of success/failure (never raises).
+    Trigger the MANNA split. Mock mode never moves real money. Live mode requires
+    a signed, fresh AETHEL execution-admission receipt bound to the task, lineage,
+    amounts, currency and destinations. Missing/invalid admission fails closed.
     """
-    validate_payment_mode()
     split = calculate_manna_split(MANNA_CENTS)
+    try:
+        validate_payment_mode()
+    except Exception as exc:
+        return PaymentResult(
+            task_id=task_id,
+            lineage_hash=lineage_hash,
+            split=split,
+            community_id=None,
+            crew_id=None,
+            architect_id=None,
+            status="failed",
+            error=str(exc),
+        )
 
     if MOCK_MODE:
         return PaymentResult(
@@ -177,7 +262,26 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
             status="mock",
         )
 
-    # Live mode — three separate transfers with idempotency keys
+    # Live mode — validate the receipt before any transfer call. Each actual
+    # Stripe call re-verifies the same receipt and the exact bucket amount/destination.
+    try:
+        expected_claims = build_payment_admission_claims(task_id, lineage_hash)
+        valid, reason = verify_execution_admission(admission_receipt, expected_claims)
+    except Exception as exc:
+        valid, reason = False, str(exc)
+    if not valid:
+        log.error("[STRIPE] Live MANNA split denied before execution: %s", reason)
+        return PaymentResult(
+            task_id=task_id,
+            lineage_hash=lineage_hash,
+            split=split,
+            community_id=None,
+            crew_id=None,
+            architect_id=None,
+            status="failed",
+            error="Live transfer denied: signed AETHEL execution admission is invalid.",
+        )
+
     # Idempotency key = lineage_hash + bucket, so retries are safe
     community_id = None
     crew_id = None
@@ -189,6 +293,7 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
             task_id,
             "community",
             idempotency_key=f"{lineage_hash}_community",
+            admission_receipt=admission_receipt,
         )
         crew_id = _live_transfer(
             split.crew_cents,
@@ -196,6 +301,7 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
             task_id,
             "crew",
             idempotency_key=f"{lineage_hash}_crew",
+            admission_receipt=admission_receipt,
         )
         architect_id = _live_transfer(
             split.architect_cents,
@@ -203,6 +309,7 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
             task_id,
             "architect",
             idempotency_key=f"{lineage_hash}_architect",
+            admission_receipt=admission_receipt,
         )
         return PaymentResult(
             task_id=task_id,
