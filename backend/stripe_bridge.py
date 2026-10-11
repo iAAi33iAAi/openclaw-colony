@@ -64,11 +64,15 @@ def validate_payment_mode() -> None:
             )
         admission_key = os.environ.get("COLONY_EXECUTION_ADMISSION_SECRET", "")
         biometric_key = os.environ.get("COLONY_BAS_SECRET", "")
-        if len(admission_key) < 32 or (
-            biometric_key and admission_key == biometric_key
+        lowered_key = admission_key.lower()
+        placeholders = ("replace-with", "change-me", "changeme", "placeholder", "example", "<", ">", "...")
+        if (
+            len(admission_key) < 32
+            or any(marker in lowered_key for marker in placeholders)
+            or (biometric_key and admission_key == biometric_key)
         ):
             raise RuntimeError(
-                "Live Stripe transfers require a distinct "
+                "Live Stripe transfers require a distinct, non-placeholder "
                 "COLONY_EXECUTION_ADMISSION_SECRET of at least 32 characters."
             )
 
