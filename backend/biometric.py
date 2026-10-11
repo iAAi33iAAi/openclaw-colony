@@ -120,6 +120,17 @@ class ColonyMember(Base):
     last_seen_at      = Column(DateTime, nullable=True)
 
 
+class ScannerRequestNonce(Base):
+    """Persistent replay guard for signed scanner requests."""
+    __tablename__ = "scanner_request_nonces"
+    __table_args__ = {"extend_existing": True}
+
+    nonce = Column(String(128), primary_key=True)
+    scanner_id = Column(String(128), nullable=False, index=True)
+    signed_timestamp = Column(Integer, nullable=False)
+    received_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 class BiometricAttestation(Base):
     """
     Short-lived proof-of-presence token issued by the scanner.
