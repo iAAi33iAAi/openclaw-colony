@@ -399,6 +399,49 @@ class CAIOSAdapter:
             }
 
         cpol = payload.get("cpol", {})
+        controls = payload.get("advisory_controls", {})
+        required_false = (
+            "tool_dispatcher_present",
+            "tool_addendum_present",
+            "searcher_present",
+            "os_controller_present",
+            "agent_designer_enabled",
+            "axiom_manager_enabled",
+            "os_control_enabled",
+        )
+        controls_closed = (
+            isinstance(controls, dict)
+            and all(controls.get(field) is False for field in required_false)
+            and controls.get("available_tool_count") == 0
+            and controls.get("execution_modules_blocked") is True
+            and controls.get("working_directory_isolated") is True
+        )
+        advisory_verified = (
+            payload.get("advisory_only") is True
+            and payload.get("tool_dispatch_enabled") is False
+            and controls_closed
+        )
+        if not advisory_verified:
+            return {
+                "protocol": "aethel-interop/1",
+                "service": "caios",
+                "version": "external",
+                "request_id": request_id,
+                "status": "ERROR",
+                "decision": None,
+                "reasons": ["CAIOS advisory controls could not be verified; output discarded."],
+                "result": {},
+                "evidence": {
+                    **state,
+                    "child_exit_code": proc.returncode,
+                    "stdout_hash": hashlib.sha256(proc.stdout.encode()).hexdigest(),
+                    "tool_dispatch_enabled": payload.get("tool_dispatch_enabled", True),
+                    "advisory_only_reported": payload.get("advisory_only"),
+                    "advisory_controls": controls if isinstance(controls, dict) else {},
+                    "advisory_controls_verified": False,
+                },
+            }
+
         return {
             "protocol": "aethel-interop/1",
             "service": "caios",
@@ -410,17 +453,15 @@ class CAIOSAdapter:
             "result": {
                 "output": payload.get("output", ""),
                 "cpol": cpol if isinstance(cpol, dict) else {},
-                "advisory_only": True,
+                "advisory_only": payload.get("advisory_only") is True,
             },
             "evidence": {
                 **state,
                 "child_exit_code": proc.returncode,
                 "stdout_hash": hashlib.sha256(proc.stdout.encode()).hexdigest(),
-                "tool_dispatch_enabled": payload.get("tool_dispatch_enabled", True),
-                "advisory_controls": payload.get("advisory_controls", {}),
-                "working_directory_isolated": (
-                    payload.get("advisory_controls", {}).get("working_directory_isolated", False)
-                    if isinstance(payload.get("advisory_controls"), dict) else False
-                ),
+                "tool_dispatch_enabled": payload.get("tool_dispatch_enabled"),
+                "advisory_controls": controls,
+                "advisory_controls_verified": True,
+                "working_directory_isolated": controls.get("working_directory_isolated") is True,
             },
         }
