@@ -536,6 +536,18 @@ class TestFastAPIEndpoints:
         monkeypatch.setenv("COLONY_APPROVAL_REQUIRED", "false")
         assert self.cc._approval_required_from_env() is False
 
+    def test_approval_override_is_strict_and_development_only(self, monkeypatch):
+        monkeypatch.setenv("COLONY_ENV", "development")
+        assert self.cc._approval_override_allowed(True) is True
+        for invalid in (False, "true", "false", 1, None):
+            assert self.cc._approval_override_allowed(invalid) is False
+
+        monkeypatch.setenv("COLONY_ENV", "production")
+        assert self.cc._approval_override_allowed(True) is False
+
+        monkeypatch.setenv("COLONY_ENV", "staging")
+        assert self.cc._approval_override_allowed(True) is False
+
 
     def test_process_returns_payment_field(self):
         resp = self.client.post("/process", json={"prompt": "test", "human_consent": True})
