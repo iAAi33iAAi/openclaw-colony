@@ -48,9 +48,9 @@ Use the same field values for signing and for the HTTP body.
    ```python
    message = (
        timestamp.encode("ascii")
-       + b"\\n"
+       + b"\n"
        + nonce.encode("utf-8")
-       + b"\\n"
+       + b"\n"
        + body.encode("utf-8")
    )
    signature = hmac.new(
