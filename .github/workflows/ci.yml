@@ -11,6 +11,7 @@ on:
 
 env:
   COLONY_DB_PATH: ":memory:"
+  COLONY_ENV: "test"
   COLONY_DEV_MODE: "true"
   COLONY_ADMIN_KEY: "ci-test-admin-key"
   COLONY_BAS_SECRET: "ci-test-bas-secret-that-is-long-enough-for-validation"
