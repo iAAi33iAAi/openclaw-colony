@@ -233,6 +233,23 @@ class TestEnrollment:
 
 class TestAttestationIssuance:
 
+    @pytest.mark.parametrize("score", [float("nan"), float("inf"), float("-inf"), -0.01, 1.01, True])
+    def test_nonfinite_or_out_of_range_liveness_is_rejected(self, score):
+        db = SessionLocal()
+        try:
+            m = _make_member(db)
+            with pytest.raises(ValueError, match="Liveness score"):
+                issue_attestation(
+                    db=db,
+                    badge_serial=m.badge_serial,
+                    face_scan_bytes=b"face_alice",
+                    retina_scan_bytes=b"retina_alice",
+                    liveness_score=score,
+                    location_node="node-001",
+                )
+        finally:
+            db.close()
+
     def test_valid_attestation_issued(self):
         db = SessionLocal()
         try:
