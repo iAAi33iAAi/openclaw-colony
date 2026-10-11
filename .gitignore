@@ -22,10 +22,11 @@ backend/aethel-grid/kernel/target/
 *.db-wal
 *.db-shm
 
-# Environment secrets (NEVER commit)
+# Environment secrets (NEVER commit). Keep only documented templates in Git.
 .env
-.env.local
-.env.production
+.env.*
+!.env.example
+!.env.*.example
 *.secret
 
 # IDE
