@@ -1,5 +1,7 @@
 """CAIOS adapter and interop contract tests."""
+import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -107,6 +109,50 @@ def test_caios_adapter_uses_class_entrypoint_and_is_advisory_only(tmp_path, monk
     assert data["evidence"]["advisory_controls"]["os_control_enabled"] is False
     # Import-time relative directory creation must not touch the source tree.
     assert not (source / "knowledge_base").exists()
+
+
+def test_caios_adapter_discards_output_when_control_state_is_not_closed(tmp_path, monkeypatch):
+    import caios_adapter as adapter_module
+    from caios_adapter import CAIOSAdapter, CAIOS_COMMIT
+
+    source = tmp_path / "Project_Andrew"
+    _make_class_api_checkout(source)
+    adapter = CAIOSAdapter(source_path=str(source))
+    monkeypatch.setattr(adapter, "_checkout_commit", lambda: CAIOS_COMMIT)
+
+    fake_output = {
+        "status": "ok",
+        "output": "this must not be forwarded",
+        "cpol": {"status": "PASS"},
+        "advisory_only": True,
+        "tool_dispatch_enabled": True,
+        "advisory_controls": {
+            "tool_dispatcher_present": True,
+            "tool_addendum_present": False,
+            "searcher_present": False,
+            "os_controller_present": False,
+            "available_tool_count": 0,
+            "agent_designer_enabled": False,
+            "axiom_manager_enabled": False,
+            "os_control_enabled": False,
+            "execution_modules_blocked": True,
+            "working_directory_isolated": True,
+        },
+    }
+    completed = subprocess.CompletedProcess(
+        args=["python", "-c", "..."],
+        returncode=0,
+        stdout=json.dumps(fake_output) + "\n",
+        stderr="",
+    )
+    monkeypatch.setattr(adapter_module.subprocess, "run", lambda *args, **kwargs: completed)
+
+    data = adapter.evaluate("review this proposal")
+    assert data["status"] == "ERROR"
+    assert data["result"] == {}
+    assert data["evidence"]["advisory_controls_verified"] is False
+    assert data["evidence"]["tool_dispatch_enabled"] is True
+    assert "discarded" in data["reasons"][0]
 
 
 def test_caios_adapter_rejects_unpinned_checkout(tmp_path, monkeypatch):
