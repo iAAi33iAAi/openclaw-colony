@@ -38,7 +38,7 @@ class ColonyTask:
     submitted_at: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()
     )
-    human_consent: bool = True          # Gate 1 — must be explicitly set
+    human_consent: bool = False         # Gate 1 — opt-in only; omitted consent blocks
 
 
 @dataclass
@@ -88,6 +88,11 @@ class ColonyCoordinator:
 
     async def process(self, task: ColonyTask) -> ColonyResult:
         log.info("Processing task %s: %r", task.task_id, task.prompt[:80])
+
+        # Dataclass annotations are not runtime guards. Ambiguous consent fails closed.
+        if type(task.human_consent) is not bool:
+            log.error("Invalid human_consent type for task %s; forcing consent=False.", task.task_id)
+            task.human_consent = False
 
         # 1 — Parallel agent evaluation
         agent_outputs = await self._run_agents(task)
@@ -178,9 +183,10 @@ class ColonyCoordinator:
 
 # ── FastAPI application ────────────────────────────────────────────────────────
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictBool
+from auth import get_current_key
 
 app = FastAPI(title="OpenClaw Colony API", version="0.4.0")
 
@@ -203,7 +209,7 @@ async def startup():
 
 class TaskRequest(BaseModel):
     prompt: str
-    human_consent: bool = True
+    human_consent: StrictBool = False
 
 
 class TaskResponse(BaseModel):
@@ -218,7 +224,7 @@ class TaskResponse(BaseModel):
 
 
 @app.post("/process", response_model=TaskResponse)
-async def process_task(req: TaskRequest):
+async def process_task(req: TaskRequest, api_key=Depends(get_current_key)):
     if not coordinator:
         raise HTTPException(status_code=503, detail="Colony not initialised")
     task = ColonyTask(prompt=req.prompt, human_consent=req.human_consent)
