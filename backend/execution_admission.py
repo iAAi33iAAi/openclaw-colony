@@ -67,8 +67,12 @@ def issue_execution_admission(
         raise ValueError("AETHEL result is not APPROVED.")
     if not isinstance(payment_claims, dict):
         raise ValueError("payment claims must be an object.")
-    if not 1 <= ttl_seconds <= MAX_ADMISSION_TTL_SECONDS:
-        raise ValueError("admission TTL is outside the permitted range.")
+    if (
+        isinstance(ttl_seconds, bool)
+        or not isinstance(ttl_seconds, int)
+        or not 1 <= ttl_seconds <= MAX_ADMISSION_TTL_SECONDS
+    ):
+        raise ValueError("admission TTL must be an integer in the permitted range.")
 
     gates = aethel_result.get("gates")
     if not isinstance(gates, dict):
@@ -155,7 +159,7 @@ def verify_execution_admission(
     ):
         return False, "execution-admission timestamps are invalid."
     now = int(time.time()) if now_epoch is None else int(now_epoch)
-    if issued_at > now + 5 or expires_at < now or expires_at <= issued_at:
+    if issued_at > now + 5 or expires_at <= now or expires_at <= issued_at:
         return False, "execution-admission receipt is expired or not yet valid."
     if expires_at - issued_at > MAX_ADMISSION_TTL_SECONDS:
         return False, "execution-admission TTL exceeds the permitted limit."
