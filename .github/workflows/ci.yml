@@ -11,6 +11,7 @@ on:
 
 env:
   COLONY_DB_PATH: ":memory:"
+  COLONY_ENV: "test"
   COLONY_DEV_MODE: "true"
   COLONY_ADMIN_KEY: "ci-test-admin-key"
   COLONY_BAS_SECRET: "ci-test-bas-secret-that-is-long-enough-for-validation"
@@ -26,11 +27,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
+      - name: Test tracked environment-file guard
+        run: python scripts/test_tracked_env_files.py
+
+      - name: Reject tracked environment files except documented templates
+        run: python scripts/check_tracked_env_files.py
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable

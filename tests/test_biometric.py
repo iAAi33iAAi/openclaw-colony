@@ -1071,9 +1071,13 @@ class TestHMACIntegrity:
 
 class TestAethelGate0Integration:
 
-    def test_gate0_bypassed_when_not_required(self):
-        """When COLONY_BIOMETRIC_REQUIRED=false, Gate 0 is bypassed."""
-        with patch.dict(os.environ, {"COLONY_BIOMETRIC_REQUIRED": "false"}):
+    def test_gate0_bypassed_only_in_explicit_development_mode(self):
+        """A Gate 0 bypass requires both a non-production environment and explicit dev mode."""
+        with patch.dict(os.environ, {
+            "COLONY_BIOMETRIC_REQUIRED": "false",
+            "COLONY_ENV": "development",
+            "COLONY_DEV_MODE": "true",
+        }):
             import aethel_interface as ai
             iface = ai.AethelInterface()
             result = iface.validate(
@@ -1085,6 +1089,57 @@ class TestAethelGate0Integration:
                 db=None,
             )
             assert result["gates"]["gate_0"]["verdict"] == "BYPASSED"
+
+    @pytest.mark.parametrize(
+        "environment,dev_mode",
+        [
+            ("production", "true"),
+            ("development", "false"),
+            ("test", "false"),
+            ("", "false"),
+        ],
+    )
+    def test_gate0_bypass_fails_closed_outside_explicit_dev_mode(self, environment, dev_mode):
+        """A false biometric flag must not bypass Gate 0 in production or non-dev mode."""
+        with patch.dict(os.environ, {
+            "COLONY_BIOMETRIC_REQUIRED": "false",
+            "COLONY_ENV": environment,
+            "COLONY_DEV_MODE": dev_mode,
+        }):
+            import aethel_interface as ai
+            iface = ai.AethelInterface()
+            result = iface.validate(
+                task_id="test-task",
+                human_consent=True,
+                lq_score=0.90,
+                agent_outputs={"agent": "output"},
+                biometric_token=None,
+                db=None,
+            )
+            assert result["verdict"] == "BLOCKED"
+            assert result["blocked_at_gate"] == 0
+            assert result["gates"]["gate_0"]["verdict"] == "FAIL"
+
+    def test_invalid_biometric_flag_fails_closed(self):
+        """Unknown environment values cannot be interpreted as permission to bypass."""
+        with patch.dict(os.environ, {
+            "COLONY_BIOMETRIC_REQUIRED": "maybe",
+            "COLONY_ENV": "development",
+            "COLONY_DEV_MODE": "true",
+        }):
+            import aethel_interface as ai
+            iface = ai.AethelInterface()
+            result = iface.validate(
+                task_id="test-task",
+                human_consent=True,
+                lq_score=0.90,
+                agent_outputs={"agent": "output"},
+                biometric_token=None,
+                db=None,
+            )
+            assert result["verdict"] == "BLOCKED"
+            assert result["blocked_at_gate"] == 0
+            assert result["gates"]["gate_0"]["verdict"] == "FAIL"
 
     def test_gate0_blocks_without_token_when_required(self):
         """When biometric required, missing token blocks at Gate 0."""
