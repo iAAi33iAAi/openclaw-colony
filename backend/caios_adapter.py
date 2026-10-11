@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import textwrap
@@ -191,7 +192,17 @@ class CAIOSAdapter:
     def evaluate(self, prompt: str) -> dict[str, Any]:
         request_id = str(uuid.uuid4())
         state = self.status()
-        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > MAX_PROMPT_CHARS:
+        prompt_is_invalid = (
+            not isinstance(prompt, str)
+            or not prompt.strip()
+            or len(prompt) > MAX_PROMPT_CHARS
+            or (isinstance(prompt, str) and prompt.lstrip().startswith("/"))
+            or (
+                isinstance(prompt, str)
+                and re.search(r"(?<![\\w])#UPDATE(?![\\w])", prompt, re.IGNORECASE) is not None
+            )
+        )
+        if prompt_is_invalid:
             return {
                 "protocol": "aethel-interop/1",
                 "service": "caios",
@@ -311,6 +322,6 @@ class CAIOSAdapter:
                 **state,
                 "child_exit_code": proc.returncode,
                 "stdout_hash": hashlib.sha256(proc.stdout.encode()).hexdigest(),
-                "tool_dispatch_enabled": payload.get("tool_dispatch_enabled") is False,
+                "tool_dispatch_enabled": payload.get("tool_dispatch_enabled", True),
             },
         }
