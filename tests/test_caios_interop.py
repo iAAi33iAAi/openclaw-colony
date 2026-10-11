@@ -23,28 +23,54 @@ def _make_class_api_checkout(path: Path):
     (path / "orchestrator.py").write_text(
         """
 import os
+from pathlib import Path
 shared_memory = {
     "node_id": "test-node",
     "node_tier": 1,
     "tool_dispatcher": object(),
     "tool_addendum": "tools enabled",
+    "searcher": object(),
+    "os_controller": object(),
+    "available_tools": ["browser_interact", "windows_mcp"],
     "last_cpol_result": {},
 }
 AD_AVAILABLE = True
+AMGR_AVAILABLE = True
+OSC_AVAILABLE = True
+MESH_AVAILABLE = True
+ABSTRACTION_AVAILABLE = True
+
+class MeshCoordinator:
+    def __init__(self, *args, **kwargs):
+        raise RuntimeError("real mesh coordinator must not be initialized")
+
+# Mimic import-time CAIOS data-directory creation. The adapter must use an
+# isolated temporary cwd rather than modifying the pinned external checkout.
+os.makedirs("knowledge_base", exist_ok=True)
 
 class CAIOSOrchestrator:
     def __init__(self, node_id, node_tier=1, shared_memory=None):
         self.node_id = node_id
         self.node_tier = node_tier
         self.shared_memory = shared_memory or {}
+        # Simulate a future CAIOS constructor re-enabling controls; the adapter
+        # must close them again after construction and before invoking the API.
+        self.shared_memory["tool_dispatcher"] = object()
+        self.shared_memory["available_tools"] = ["windows_mcp"]
 
     def handle_user_request(self, user_input, provider="openai"):
         if self.shared_memory.get("tool_dispatcher") is not None:
             raise RuntimeError("advisory adapter left tool dispatch enabled")
         if self.shared_memory.get("tool_addendum"):
             raise RuntimeError("advisory adapter left tool instructions enabled")
-        if AD_AVAILABLE:
-            raise RuntimeError("advisory adapter left self-extension enabled")
+        if self.shared_memory.get("available_tools") != []:
+            raise RuntimeError("advisory adapter left available tools enabled")
+        if self.shared_memory.get("searcher") is not None:
+            raise RuntimeError("advisory adapter left search enabled")
+        if self.shared_memory.get("os_controller") is not None:
+            raise RuntimeError("advisory adapter left OS control enabled")
+        if AD_AVAILABLE or AMGR_AVAILABLE or OSC_AVAILABLE or MESH_AVAILABLE or ABSTRACTION_AVAILABLE:
+            raise RuntimeError("advisory adapter left an optional execution subsystem enabled")
         if os.getenv("STRIPE_SECRET_KEY"):
             raise RuntimeError("payment secret leaked into advisory subprocess")
         self.shared_memory["last_cpol_result"] = {
@@ -74,7 +100,13 @@ def test_caios_adapter_uses_class_entrypoint_and_is_advisory_only(tmp_path, monk
     assert data["result"]["output"] == "advisory response: review this proposal"
     assert data["result"]["advisory_only"] is True
     assert data["evidence"]["tool_dispatch_enabled"] is False
+    assert data["evidence"]["working_directory_isolated"] is True
     assert data["evidence"]["commit_matches_pin"] is True
+    assert data["evidence"]["advisory_controls"]["available_tool_count"] == 0
+    assert data["evidence"]["advisory_controls"]["execution_modules_blocked"] is True
+    assert data["evidence"]["advisory_controls"]["os_control_enabled"] is False
+    # Import-time relative directory creation must not touch the source tree.
+    assert not (source / "knowledge_base").exists()
 
 
 def test_caios_adapter_rejects_unpinned_checkout(tmp_path, monkeypatch):
