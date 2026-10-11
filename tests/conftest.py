@@ -20,6 +20,9 @@ if _backend not in sys.path:
     sys.path.insert(0, os.path.abspath(_backend))
 
 # ── Safe defaults applied before any test module is collected ─────────────────
+# Tests must opt into the development/test-only biometric bypass explicitly.
+os.environ.setdefault("COLONY_ENV", "test")
+os.environ.setdefault("COLONY_DEV_MODE", "true")
 
 os.environ.setdefault("COLONY_DB_PATH",
                       "file:colony_test_global?mode=memory&cache=shared&uri=true")
