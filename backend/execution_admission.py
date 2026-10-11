@@ -31,7 +31,9 @@ def _canonical_json(value: Any) -> str:
 
 def _signing_material() -> bytes | None:
     raw = os.environ.get("COLONY_EXECUTION_ADMISSION_SECRET", "")
-    if len(raw) < 32:
+    lowered = raw.lower()
+    placeholders = ("replace-with", "change-me", "changeme", "placeholder", "example", "<", ">", "...")
+    if len(raw) < 32 or any(marker in lowered for marker in placeholders):
         return None
     biometric_key = os.environ.get("COLONY_BAS_SECRET", "")
     if biometric_key and hmac.compare_digest(raw, biometric_key):
