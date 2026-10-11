@@ -108,6 +108,15 @@ def _approval_required_from_env() -> bool:
     return True
 
 
+def _approval_override_allowed(value: Any) -> bool:
+    """A bypass is honored only for an actual boolean in explicit dev/test mode."""
+    environment = os.environ.get("COLONY_ENV", "").strip().lower()
+    allowed = type(value) is bool and value is True and environment in {"development", "test"}
+    if value and not allowed:
+        log.error("Ignoring approval override outside explicit development/test mode.")
+    return allowed
+
+
 # ── Coordinator ───────────────────────────────────────────────────────────────
 
 class ColonyCoordinator:
@@ -145,14 +154,7 @@ class ColonyCoordinator:
             log.error("Invalid human_consent type for task %s; forcing consent=False.", task.task_id)
             task.human_consent = False
 
-        environment = os.environ.get("COLONY_ENV", "").strip().lower()
-        effective_approval_override = (
-            type(approval_override) is bool
-            and approval_override is True
-            and environment in {"development", "test"}
-        )
-        if approval_override and not effective_approval_override:
-            log.error("Ignoring approval override outside explicit development/test mode.")
+        effective_approval_override = _approval_override_allowed(approval_override)
 
         # 1 — Parallel agent evaluation
         agent_outputs = await self._run_agents(task)
