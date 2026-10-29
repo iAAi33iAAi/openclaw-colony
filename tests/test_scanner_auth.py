@@ -32,6 +32,12 @@ def db_session():
 
 @pytest.fixture
 def client():
+    init_db()
+    session = SessionLocal()
+    session.query(ScannerRequestNonce).delete()
+    session.commit()
+    session.close()
+
     app = FastAPI()
     app.include_router(biometric_routes.router)
 
