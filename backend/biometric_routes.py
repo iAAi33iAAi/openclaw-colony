@@ -21,12 +21,13 @@ import logging
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException, Header, Request
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from db import get_db
 from auth import require_admin
+from scanner_auth import verify_scanner_request
 from biometric import (
     init_biometric_tables,
     enroll_member,
@@ -140,15 +141,41 @@ def enroll(
 # ── Attestation issuance ──────────────────────────────────────────────────────
 
 @router.post("/attest")
-def attest(
+async def attest(
     req: AttestRequest,
+    request: Request,
+    x_scanner_timestamp: Optional[str] = Header(None, alias="X-Scanner-Timestamp"),
+    x_scanner_nonce: Optional[str] = Header(None, alias="X-Scanner-Nonce"),
+    x_scanner_signature: Optional[str] = Header(None, alias="X-Scanner-Signature"),
     db: Session = Depends(get_db),
 ):
     """
     Called by the physical scanner after capturing biometrics.
-    Returns a 90-second signed attestation token.
-    No admin key required — scanner hardware authenticates via network isolation.
+    Requires an HMAC signature over the exact request body, timestamp and
+    single-use nonce before any biometric verification or token issuance.
+    Returns a 90-second signed attestation token after authentication succeeds.
     """
+    signed_body = await request.body()
+    signature_ok, signature_reason = verify_scanner_request(
+        db,
+        timestamp=x_scanner_timestamp,
+        nonce=x_scanner_nonce,
+        signature=x_scanner_signature,
+        body=signed_body,
+    )
+    if not signature_ok:
+        if signature_reason == "scanner_auth_not_configured":
+            log.error("[BIOMETRIC][ATTEST] Scanner request authentication is not configured.")
+            raise HTTPException(
+                status_code=503,
+                detail="Scanner request authentication is not configured.",
+            )
+        log.warning("[BIOMETRIC][ATTEST] Scanner request authentication rejected: %s", signature_reason)
+        raise HTTPException(
+            status_code=401,
+            detail="Scanner request authentication failed. Access denied.",
+        )
+
     try:
         token = issue_attestation(
             db=db,
