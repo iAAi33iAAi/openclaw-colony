@@ -49,7 +49,6 @@ ZONE 5 — KERNEL (Rust, in-process)
 | POST /federation/* | Yes | Bearer COLONY_ADMIN_KEY |
 | POST /biometric/* | Yes | Bearer API key |
 | POST /webhook/stripe | Yes | Stripe signature |
-| Live Stripe transfers (internal) | Yes | Operator approval queue + signed AETHEL transfer receipt; disabled unless COLONY_LIVE_PAYMENTS_ENABLED=true |
 
 ---
 
@@ -62,7 +61,6 @@ ZONE 5 — KERNEL (Rust, in-process)
 | API key storage | SHA-256 hash | Random at creation | Per key |
 | Federation auth | Bearer (plaintext) | COLONY_ADMIN_KEY | Manual |
 | Stripe webhook | HMAC-SHA256 | STRIPE_WEBHOOK_SECRET | Stripe |
-| Live transfer admission | HMAC-SHA256 | COLONY_PAYMENT_ADMISSION_SECRET (32+ UTF-8 bytes) | Rotate via controlled signing-key update; live rail defaults off |
 
 ---
 
