@@ -137,7 +137,9 @@ def _is_placeholder(raw: str) -> bool:
         return True
     if any(normalized.startswith(prefix) for prefix in PLACEHOLDER_PREFIXES):
         return True
-    if normalized.startswith(("os.getenv(", "os.environ", "process.env.", "getenv(")):
+    if normalized.startswith(("os.getenv(", "os.environ", "process.env.", "getenv(", "re.compile(", "re.pattern(")):
+        return True
+    if re.fullmatch(r"\{[A-Za-z_][A-Za-z0-9_]*\}", value):
         return True
     if REFERENCE_VALUE.fullmatch(value):
         return True
