@@ -34,6 +34,7 @@ from db import (
 from auth import get_current_key, require_admin
 from rate_limit import limiter, RATE_PROCESS, RATE_ADMIN, RATE_WEBHOOK
 from stripe_bridge import process_manna_payment, MOCK_MODE
+from payment_admission import is_transfer_admission_configured, issue_transfer_admission
 from federation import (
     init_federation_tables, federation_sync_loop,
     NODE_ID, NODE_URL, PEER_URLS,
@@ -164,7 +165,10 @@ class ColonyCoordinator:
         payment_info     = None
 
         approval_status = None
-        approval_required = os.getenv("COLONY_APPROVAL_REQUIRED", "false").lower() == "true"
+        approval_required = (
+            os.getenv("COLONY_APPROVAL_REQUIRED", "false").lower() == "true"
+            or not MOCK_MODE  # live transfers always require a separate human approval pass
+        )
         if aethel_result["verdict"] == "APPROVED" and approval_required and not approval_override:
             db = SessionLocal()
             try:
@@ -555,6 +559,28 @@ async def admin_decide_approval(
         db.commit()
         raise HTTPException(status_code=409, detail=row.reason)
 
+    # Live transfers are never executed as a side effect of /process. They
+    # require an explicit operator decision and a configured signing key.
+    if decision == "APPROVE" and not MOCK_MODE:
+        config_error = None
+        if os.getenv("COLONY_LIVE_PAYMENTS_ENABLED", "").lower() != "true":
+            config_error = "Live transfers are disabled by COLONY_LIVE_PAYMENTS_ENABLED."
+        elif not is_transfer_admission_configured():
+            config_error = "Signed transfer-admission key is not configured."
+        if config_error:
+            row.status = "PENDING"
+            row.reason = config_error + " No lineage or external transfer was created."
+            row.decided_by = None
+            row.decided_at = None
+            if task_row:
+                task_row.status = "PENDING_APPROVAL"
+                task_row.reason = row.reason
+            db.commit()
+            raise HTTPException(
+                status_code=503,
+                detail="Live transfer configuration is incomplete; approval remains pending.",
+            )
+
     try:
         task = ColonyTask(
             task_id=row.task_id,
@@ -584,7 +610,21 @@ async def admin_decide_approval(
             committed_action,
         )
 
-        payment = process_manna_payment(task_id, lineage_hash)
+        admission = None
+        if not MOCK_MODE:
+            admission = issue_transfer_admission(
+                decision=decision,
+                task_id=task_id,
+                lineage_hash=lineage_hash,
+                amount_cents=MANNA_CENTS,
+                approval_ref=f"approval-record:{row.id}",
+            )
+        payment = process_manna_payment(
+            task_id,
+            lineage_hash,
+            admission=admission,
+            db=db,
+        )
         db.add(
             PaymentRecordModel(
                 task_id=task_id,
