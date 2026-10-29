@@ -23,6 +23,7 @@ backend/aethel-grid/kernel/target/
 *.db-shm
 
 # Environment secrets (NEVER commit)
+*.windows
 .env
 .env.local
 .env.production
