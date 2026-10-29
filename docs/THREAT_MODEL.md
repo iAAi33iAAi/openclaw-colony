@@ -189,6 +189,16 @@ ZONE 5 — RUST KERNEL      In-process. Highest trust. Memory-safe by constructi
 
 ---
 
+### T14 — Live Transfer Without Signed AETHEL Admission
+**Category:** Unauthorized financial side effect
+**Attack:** An internal caller invokes the live payment bridge with only a task ID and lineage hash, without proving an approved decision for that exact task and amount.
+**Mitigation in this branch:** Live transfers are disabled unless `COLONY_LIVE_PAYMENTS_ENABLED=true`; configuring Stripe live/test API credentials forces tasks through the durable operator approval queue. The payment bridge verifies an HMAC-signed receipt bound to the exact task ID, lineage hash, total amount, USD currency, persisted approval-record reference, 60-second expiry and unique nonce. The nonce is durably claimed before a Stripe call; Stripe idempotency keys remain bound to lineage and bucket.
+**Configuration:** `COLONY_PAYMENT_ADMISSION_SECRET` must be a strong out-of-band secret of at least 32 UTF-8 bytes. `.env.example` leaves it empty and the live-transfer enable flag off.
+**Residual risk:** The signing key and verifier share the same application runtime; a full process compromise or signing-key disclosure can forge receipts. Partial completion of the three transfers still requires explicit reconciliation. This is an application control, not an HSM-backed independent signer.
+**Operational requirement:** Keep live transfers disabled until approval policy, key management, Stripe connected-account configuration, reconciliation and all tests have been reviewed.
+
+---
+
 ## Risk Matrix
 
 | Threat | Likelihood | Impact | Priority |
@@ -196,6 +206,7 @@ ZONE 5 — RUST KERNEL      In-process. Highest trust. Memory-safe by constructi
 | T5 — Federation impersonation | Medium | High | CRITICAL |
 | T9 — Ephemeral secret key | Low | Medium | HIGH |
 | T12 — Session replay | Low | High | HIGH |
+| T14 — Live transfer without signed admission | Medium | Critical | CRITICAL |
 | T1 — Token replay | Medium | High | HIGH |
 | T6 — Chain tampering | Low | Critical | HIGH |
 | T3 — Gate 3 evasion | Medium | High | MEDIUM |
@@ -221,6 +232,12 @@ ZONE 5 — RUST KERNEL      In-process. Highest trust. Memory-safe by constructi
 | Rate limiting | ✅ | rate_limit.py |
 | AGPL v3 | ✅ | LICENSE |
 | Constitutional tests | ✅ | tests/test_covenant.py |
+
+## Draft Mitigations in Security PR
+
+| Mitigation | Status | Files |
+|-----------|--------|------|
+| Task/lineage/amount-bound signed transfer admission, explicit live enable switch and one-time nonce | Draft implementation; CI and deployment review required | payment_admission.py, stripe_bridge.py, db.py, colony_coordinator_v2.py |
 
 ## Mitigations Pending
 
