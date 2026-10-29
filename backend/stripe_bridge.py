@@ -40,6 +40,10 @@ MANNA_CENTS               = int(os.environ.get("COLONY_MANNA_CENTS", "100"))
 
 MOCK_MODE = not bool(STRIPE_SECRET_KEY)
 
+# Private in-process capability: the raw Stripe primitive is not a public API.
+# It is only passed after process_manna_payment verifies the signed admission.
+_TRANSFER_CALL_PERMIT = object()
+
 def validate_payment_mode() -> None:
     """Reject Stripe mock mode when the deployment declares production."""
     if MOCK_MODE and os.environ.get("COLONY_ENV", "").lower() == "production":
@@ -115,8 +119,12 @@ def _live_transfer(
     task_id: str,
     label: str,
     idempotency_key: str,
+    *,
+    _permit: object | None = None,
 ) -> str:
-    """Execute a real Stripe transfer to a connected account."""
+    """Execute a transfer only when called through the verified admission path."""
+    if _permit is not _TRANSFER_CALL_PERMIT:
+        raise PermissionError("direct live-transfer invocation is denied; use process_manna_payment")
     import stripe
     transfer = stripe.Transfer.create(
         amount=amount_cents,
@@ -220,6 +228,7 @@ def process_manna_payment(
             task_id,
             "community",
             idempotency_key=f"{lineage_hash}_community",
+            _permit=_TRANSFER_CALL_PERMIT,
         )
         crew_id = _live_transfer(
             split.crew_cents,
@@ -227,6 +236,7 @@ def process_manna_payment(
             task_id,
             "crew",
             idempotency_key=f"{lineage_hash}_crew",
+            _permit=_TRANSFER_CALL_PERMIT,
         )
         architect_id = _live_transfer(
             split.architect_cents,
@@ -234,6 +244,7 @@ def process_manna_payment(
             task_id,
             "architect",
             idempotency_key=f"{lineage_hash}_architect",
+            _permit=_TRANSFER_CALL_PERMIT,
         )
         return PaymentResult(
             task_id=task_id,
