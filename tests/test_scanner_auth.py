@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import biometric_routes
+from scanner_client_auth import build_attestation_auth_headers
 from db import ScannerRequestNonce, SessionLocal, init_db
 from scanner_auth import create_scanner_signature, verify_scanner_request
 
@@ -67,18 +68,29 @@ def _payload_body() -> bytes:
 def _signed_headers(body: bytes, secret: str = TEST_SECRET, nonce: str | None = None):
     timestamp = str(int(time.time()))
     nonce = nonce or uuid.uuid4().hex
-    signature = create_scanner_signature(
+    signed = build_attestation_auth_headers(
         body=body,
         timestamp=timestamp,
         nonce=nonce,
         secret=secret,
     )
-    return {
-        "Content-Type": "application/json",
-        "X-Scanner-Timestamp": timestamp,
-        "X-Scanner-Nonce": nonce,
-        "X-Scanner-Signature": signature,
-    }
+    return {"Content-Type": "application/json", **signed}
+
+
+def test_reference_client_signer_matches_server_verifier(db_session):
+    body = _payload_body()
+    headers = _signed_headers(body)
+    valid, reason = verify_scanner_request(
+        db_session,
+        timestamp=headers["X-Scanner-Timestamp"],
+        nonce=headers["X-Scanner-Nonce"],
+        signature=headers["X-Scanner-Signature"],
+        body=body,
+        secret=TEST_SECRET,
+        now_epoch=int(headers["X-Scanner-Timestamp"]),
+    )
+    assert valid is True
+    assert reason == "OK"
 
 
 def test_valid_signature_claims_nonce_and_duplicate_is_rejected(db_session, monkeypatch):
