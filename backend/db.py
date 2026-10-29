@@ -141,6 +141,16 @@ class PaymentRecord(Base):
     created_at          = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class TransferAuthorizationNonce(Base):
+    """Single-use nonce registry for signed AETHEL transfer authorizations."""
+    __tablename__ = "transfer_authorization_nonces"
+
+    nonce_hash = Column(String(64), primary_key=True)
+    task_id = Column(String(36), nullable=False, index=True)
+    lineage_hash = Column(String(64), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 class WebhookEvent(Base):
     """Idempotency log for Stripe webhook events."""
     __tablename__ = "webhook_events"
