@@ -153,6 +153,17 @@ def test_missing_signing_secret_blocks_admission(db_session, monkeypatch):
     assert reason == "payment_admission_not_configured"
 
 
+def test_raw_transfer_primitive_denies_direct_invocation():
+    with pytest.raises(PermissionError, match="direct live-transfer invocation is denied"):
+        stripe_bridge._live_transfer(
+            100,
+            "acct_test_destination",
+            TASK_ID,
+            "community",
+            "lineage-community",
+        )
+
+
 def test_live_transfer_without_receipt_never_calls_stripe(db_session, monkeypatch):
     monkeypatch.setattr(stripe_bridge, "MOCK_MODE", False)
     monkeypatch.setenv("COLONY_LIVE_PAYMENTS_ENABLED", "true")
