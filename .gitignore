@@ -47,3 +47,16 @@ htmlcov/
 
 # Logs
 *.log
+# Common environment-file variants. Keep only explicit templates tracked.
+.env.*
+!.env.example
+!.env.sample
+!.env.template
+!.env.dist
+*.env
+!*.env.example
+!*.env.sample
+!*.env.template
+!*.env.dist
+.envrc
+.envrc.*
