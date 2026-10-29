@@ -29,7 +29,7 @@ curl http://localhost:8000/health
 
 # 3. Check genesis
 curl http://localhost:8000/federation/status \
-  -H "Authorization: Bearer YOUR_ADMIN_KEY"
+  -H "Authorization: Bearer ${COLONY_ADMIN_KEY}"
 # Expected: lineage.record_count >= 1
 ```
 
