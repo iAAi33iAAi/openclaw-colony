@@ -47,16 +47,36 @@ ZONE 5 — KERNEL (Rust, in-process)
 | GET /docs | No | Public |
 | POST /admin/* | Yes | Bearer COLONY_ADMIN_KEY |
 | POST /federation/* | Yes | Bearer COLONY_ADMIN_KEY |
-| POST /biometric/* | Yes | Bearer API key |
+| POST /biometric/attest | Yes | HMAC-SHA256 request signature with timestamp + single-use nonce; 60-second clock window |
+| POST /biometric/enroll, /biometric/legal-export, /biometric/revoke, /biometric/duress/* | Yes | Bearer COLONY_ADMIN_KEY |
+| GET /biometric/member/*, /biometric/history/*, /biometric/revocations | Public/read-only | No authentication; verify privacy classification before production exposure |
 | POST /webhook/stripe | Yes | Stripe signature |
 
 ---
+
+## Scanner Attestation Request Signature
+
+`POST /biometric/attest` fails closed unless the scanner presents all three headers:
+- `X-Scanner-Timestamp`: Unix timestamp in seconds, within 60 seconds of server time.
+- `X-Scanner-Nonce`: 16–128 characters from the URL-safe nonce alphabet, single-use in the database.
+- `X-Scanner-Signature`: lowercase or uppercase hex HMAC-SHA256.
+
+The signature is HMAC-SHA256 over this UTF-8 message (newlines are literal):
+```
+POST
+/biometric/attest
+<timestamp>
+<nonce>
+<lowercase-hex SHA-256 of the exact raw HTTP body bytes>
+```
+The key is supplied only through `COLONY_SCANNER_HMAC_SECRET`, must be at least 32 UTF-8 bytes, and must never be committed to the repository. A missing/short key returns HTTP 503; a missing or invalid signature, stale timestamp or replayed nonce returns HTTP 401. The handler verifies the signature and durably claims the nonce before invoking biometric matching or issuing a token. Configure TLS as well; request signing does not replace transport encryption.
 
 ## Cryptographic Inventory
 
 | Component | Algorithm | Key Source | Rotation |
 |-----------|-----------|------------|---------|
 | Biometric token signing | HMAC-SHA256 | COLONY_BAS_SECRET | Manual |
+| Scanner attestation request | HMAC-SHA256 | COLONY_SCANNER_HMAC_SECRET (32+ UTF-8 bytes) | Rotate scanner key and update scanner configuration |
 | Lineage chain | SHA-256 | Deterministic | N/A |
 | API key storage | SHA-256 hash | Random at creation | Per key |
 | Federation auth | Bearer (plaintext) | COLONY_ADMIN_KEY | Manual |
