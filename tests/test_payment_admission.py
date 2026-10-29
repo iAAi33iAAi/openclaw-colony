@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import time
 from unittest.mock import MagicMock
 
 import pytest
@@ -186,7 +187,7 @@ def test_live_transfer_requires_explicit_enable_flag(db_session, monkeypatch):
 def test_valid_admission_allows_only_the_bound_transfer_set(db_session, monkeypatch):
     monkeypatch.setattr(stripe_bridge, "MOCK_MODE", False)
     monkeypatch.setenv("COLONY_LIVE_PAYMENTS_ENABLED", "true")
-    receipt = _admission(monkeypatch)
+    receipt = _admission(monkeypatch, now_epoch=int(time.time()))
     transfer = MagicMock(side_effect=["tr_community", "tr_crew", "tr_architect"])
     monkeypatch.setattr(stripe_bridge, "_live_transfer", transfer)
 
