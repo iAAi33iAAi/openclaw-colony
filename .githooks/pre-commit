@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# AETHEL Env Guard — blocks sensitive env files and credential-like values
+# in the Git index. Findings include paths and line numbers only, never values.
+set -uo pipefail
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT" || exit 2
+
+PYTHON_BIN="$(printenv AETHEL_GUARD_PYTHON 2>/dev/null || true)"
+if [ -z "$PYTHON_BIN" ]; then
+  PYTHON_BIN="python3"
+fi
+if ! command -v "$PYTHON_BIN" >/dev/null 2>&1; then
+  echo "AETHEL Env Guard: Python interpreter not found; commit blocked." >&2
+  exit 2
+fi
+
+"$PYTHON_BIN" aethel_env_guard.py precommit
+status=$?
+if [ "$status" -ne 0 ]; then
+  echo "" >&2
+  echo "COMMIT BLOCKED by AETHEL Env Guard." >&2
+  echo "Unstage the file or replace the credential with a non-secret placeholder." >&2
+  echo "If a real credential was exposed, rotate/revoke it and assess Git history." >&2
+fi
+exit "$status"
