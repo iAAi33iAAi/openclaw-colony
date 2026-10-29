@@ -189,6 +189,16 @@ ZONE 5 — RUST KERNEL      In-process. Highest trust. Memory-safe by constructi
 
 ---
 
+### T13 — Scanner Attestation Request Spoofing
+**Category:** Unauthenticated scanner endpoint / request replay
+**Attack:** A reachable client submits a biometric payload to `POST /biometric/attest` without proving possession of an authorized scanner key, or replays a captured request.
+**Mitigation in this branch:** HMAC-SHA256 signature over method, fixed route, timestamp, nonce and SHA-256 of exact raw request bytes; timestamp window limited to 60 seconds; nonce claimed in a durable database table before biometric matching; no signature secret in repository.
+**Configuration:** `COLONY_SCANNER_HMAC_SECRET` must be provisioned out-of-band and contain at least 32 UTF-8 bytes. Missing or short secret makes the endpoint unavailable (HTTP 503); bad signature, stale timestamp or replay returns HTTP 401.
+**Residual risk:** Compromise of the scanner secret or scanner device; unsynchronized scanner/server clocks; database availability; deployment without TLS. Request signing does not replace TLS or production secret management.
+**Operational requirement:** Provision and rotate the scanner key securely before enabling scanner traffic. Until configured, the endpoint intentionally fails closed.
+
+---
+
 ## Risk Matrix
 
 | Threat | Likelihood | Impact | Priority |
@@ -197,6 +207,7 @@ ZONE 5 — RUST KERNEL      In-process. Highest trust. Memory-safe by constructi
 | T9 — Ephemeral secret key | Low | Medium | HIGH |
 | T12 — Session replay | Low | High | HIGH |
 | T1 — Token replay | Medium | High | HIGH |
+| T13 — Scanner request spoofing/replay | Medium | High | HIGH |
 | T6 — Chain tampering | Low | Critical | HIGH |
 | T3 — Gate 3 evasion | Medium | High | MEDIUM |
 | T7 — SaaS cloaking | Medium | Medium | MEDIUM |
@@ -214,6 +225,7 @@ ZONE 5 — RUST KERNEL      In-process. Highest trust. Memory-safe by constructi
 |-----------|--------|------|
 | Constant-time HMAC | ✅ | aethel-kernel/src/lib.rs |
 | Single-use tokens | ✅ | biometric.py |
+| Signed scanner requests + durable nonce replay rejection (pending deployment key) | Implemented in branch | scanner_auth.py, biometric_routes.py |
 | 90s TTL | ✅ | aethel-kernel/src/lib.rs |
 | 27 extraction patterns | ✅ | aethel-kernel/src/lib.rs |
 | LQ type coercion | ✅ | aethel_interface.py |
