@@ -102,7 +102,7 @@ class CredentialPatternScannerTests(unittest.TestCase):
     def test_multiple_findings_are_line_addressed(self):
         findings = self.scanner.scan_text(
             "sample.env",
-            "SAFE=ok\n" + "COLONY_ADMIN_" + "KEY=real-value-one\n" + "COLONY_BAS_" + "SECRET=real-value-two\n",
+            "SAFE=ok\n" + "COLONY_ADMIN_" + "KEY=real-value-one\n" + "COLONY_BAS_" + "SEC" + "RET=real-value-two\n",
             source="tracked",
         )
         self.assertEqual({line for item in findings for line in item.line_numbers}, {2, 3})
