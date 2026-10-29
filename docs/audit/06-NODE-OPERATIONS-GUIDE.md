@@ -124,7 +124,7 @@ COLONY_ADMIN_KEY=shared-secret-both-nodes
 
 # Verify federation
 curl https://node001.example.com/federation/nodes \
-  -H "Authorization: Bearer shared-secret-both-nodes"
+  -H "Authorization: Bearer ${COLONY_ADMIN_KEY}"
 # Expected: peers array with node-002-austin listed
 ```
 
@@ -138,11 +138,11 @@ curl http://localhost:8000/health
 
 # Federation status
 curl http://localhost:8000/federation/status \
-  -H "Authorization: Bearer $COLONY_ADMIN_KEY"
+  -H "Authorization: Bearer ${COLONY_ADMIN_KEY}"
 
 # Lineage chain length
 curl http://localhost:8000/federation/status \
-  -H "Authorization: Bearer $COLONY_ADMIN_KEY" \
+  -H "Authorization: Bearer ${COLONY_ADMIN_KEY}" \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['lineage']['record_count'])"
 
 # Docker health
