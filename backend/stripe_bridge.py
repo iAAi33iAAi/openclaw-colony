@@ -26,6 +26,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Optional
 
+from payment_admission import verify_transfer_admission
+
 log = logging.getLogger("colony.stripe_bridge")
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -157,7 +159,13 @@ class PaymentResult:
         }
 
 
-def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
+def process_manna_payment(
+    task_id: str,
+    lineage_hash: str,
+    *,
+    admission: Optional[dict] = None,
+    db=None,
+) -> PaymentResult:
     """
     Trigger MANNA split for an APPROVED task.
     Called by the coordinator immediately after lineage is committed.
@@ -175,6 +183,29 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
             crew_id=_mock_transfer(split.crew_cents, STRIPE_CREW_ACCOUNT, task_id, "crew"),
             architect_id=_mock_transfer(split.architect_cents, STRIPE_ARCHITECT_ACCOUNT, task_id, "architect"),
             status="mock",
+        )
+
+    # Real transfers are disabled unless the operator explicitly enables the
+    # payment rail and supplies a signed, task/lineage/amount-bound admission.
+    if os.environ.get("COLONY_LIVE_PAYMENTS_ENABLED", "").lower() != "true":
+        return PaymentResult(
+            task_id=task_id, lineage_hash=lineage_hash, split=split,
+            community_id=None, crew_id=None, architect_id=None,
+            status="failed", error="LIVE_PAYMENTS_DISABLED",
+        )
+    admission_ok, admission_reason = verify_transfer_admission(
+        db,
+        admission,
+        task_id=task_id,
+        lineage_hash=lineage_hash,
+        amount_cents=MANNA_CENTS,
+    )
+    if not admission_ok:
+        log.warning("[STRIPE] Live transfer blocked by admission gate: %s", admission_reason)
+        return PaymentResult(
+            task_id=task_id, lineage_hash=lineage_hash, split=split,
+            community_id=None, crew_id=None, architect_id=None,
+            status="failed", error=f"LIVE_TRANSFER_ADMISSION_REJECTED:{admission_reason}",
         )
 
     # Live mode — three separate transfers with idempotency keys
