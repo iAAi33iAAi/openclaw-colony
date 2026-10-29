@@ -234,10 +234,11 @@ class GitIntegrationTests(unittest.TestCase):
         self.assertFalse(any(item.rule_id == "CREDENTIAL_ASSIGNMENT" for item in report.findings))
 
     def test_precommit_blocks_credential_in_staged_normal_file(self):
-        (self.root / "settings.py").write_text("COLONY_ADMIN_" + "KEY=real-secret-value-33822\n", encoding="utf-8")
+        synthetic_token = "sk_live_" + "abcdefghijklmnop1234"
+        (self.root / "settings.py").write_text("payload = '" + synthetic_token + "'\n", encoding="utf-8")
         self.git("add", "settings.py")
         report = self.guard.run_precommit()
-        self.assertTrue(any(item.rule_id == "CREDENTIAL_ASSIGNMENT" for item in report.findings))
+        self.assertTrue(any(item.rule_id == "STRIPE_LIVE_KEY" for item in report.findings))
 
     def test_history_scan_finds_deleted_env_path_and_never_prints_value(self):
         candidate_value = "historic-secret-value-should-not-appear-7782"
@@ -267,12 +268,13 @@ class GitIntegrationTests(unittest.TestCase):
         ))
 
     def test_ci_report_detects_secret_in_normal_tracked_file(self):
-        (self.root / "config.py").write_text("COLONY_ADMIN_" + "KEY=committed-real-value-98432\n", encoding="utf-8")
+        synthetic_token = "sk_live_" + "abcdefghijklmnop1234"
+        (self.root / "config.py").write_text("payload = '" + synthetic_token + "'\n", encoding="utf-8")
         self.git("add", "config.py")
         self.git("commit", "-qm", "fixture credential")
         report = self.guard.run_ci()
         self.assertTrue(any(
-            item.rule_id == "CREDENTIAL_ASSIGNMENT" and item.path == "config.py" and item.source == "tracked"
+            item.rule_id == "STRIPE_LIVE_KEY" and item.path == "config.py" and item.source == "tracked"
             for item in report.findings
         ))
 
