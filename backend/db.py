@@ -123,6 +123,16 @@ class ApiKey(Base):
     stripe_account_id = Column(String(64), nullable=True)
 
 
+class TransferAuthorizationNonce(Base):
+    """Single-use nonce registry for signed AETHEL transfer authorizations."""
+    __tablename__ = "transfer_authorization_nonces"
+
+    nonce_hash = Column(String(64), primary_key=True)
+    task_id = Column(String(36), nullable=False, index=True)
+    lineage_hash = Column(String(64), nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
 class PaymentRecord(Base):
     """Record of every Stripe MANNA split triggered by an APPROVED task."""
     __tablename__ = "payments"

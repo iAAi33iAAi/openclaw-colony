@@ -26,6 +26,8 @@ import uuid
 from dataclasses import dataclass
 from typing import Optional
 
+from payment_admission import verify_transfer_admission
+
 log = logging.getLogger("colony.stripe_bridge")
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -37,6 +39,10 @@ STRIPE_WEBHOOK_SECRET     = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 MANNA_CENTS               = int(os.environ.get("COLONY_MANNA_CENTS", "100"))
 
 MOCK_MODE = not bool(STRIPE_SECRET_KEY)
+
+# Private in-process capability: the raw Stripe primitive is not a public API.
+# It is only passed after process_manna_payment verifies the signed admission.
+_TRANSFER_CALL_PERMIT = object()
 
 def validate_payment_mode() -> None:
     """Reject Stripe mock mode when the deployment declares production."""
@@ -113,8 +119,12 @@ def _live_transfer(
     task_id: str,
     label: str,
     idempotency_key: str,
+    *,
+    _permit: object | None = None,
 ) -> str:
-    """Execute a real Stripe transfer to a connected account."""
+    """Execute a transfer only when called through the verified admission path."""
+    if _permit is not _TRANSFER_CALL_PERMIT:
+        raise PermissionError("direct live-transfer invocation is denied; use process_manna_payment")
     import stripe
     transfer = stripe.Transfer.create(
         amount=amount_cents,
@@ -157,7 +167,13 @@ class PaymentResult:
         }
 
 
-def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
+def process_manna_payment(
+    task_id: str,
+    lineage_hash: str,
+    *,
+    admission: Optional[dict] = None,
+    db=None,
+) -> PaymentResult:
     """
     Trigger MANNA split for an APPROVED task.
     Called by the coordinator immediately after lineage is committed.
@@ -177,6 +193,29 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
             status="mock",
         )
 
+    # Real transfers are disabled unless the operator explicitly enables the
+    # payment rail and supplies a signed, task/lineage/amount-bound admission.
+    if os.environ.get("COLONY_LIVE_PAYMENTS_ENABLED", "").lower() != "true":
+        return PaymentResult(
+            task_id=task_id, lineage_hash=lineage_hash, split=split,
+            community_id=None, crew_id=None, architect_id=None,
+            status="failed", error="LIVE_PAYMENTS_DISABLED",
+        )
+    admission_ok, admission_reason = verify_transfer_admission(
+        db,
+        admission,
+        task_id=task_id,
+        lineage_hash=lineage_hash,
+        amount_cents=MANNA_CENTS,
+    )
+    if not admission_ok:
+        log.warning("[STRIPE] Live transfer blocked by admission gate: %s", admission_reason)
+        return PaymentResult(
+            task_id=task_id, lineage_hash=lineage_hash, split=split,
+            community_id=None, crew_id=None, architect_id=None,
+            status="failed", error=f"LIVE_TRANSFER_ADMISSION_REJECTED:{admission_reason}",
+        )
+
     # Live mode — three separate transfers with idempotency keys
     # Idempotency key = lineage_hash + bucket, so retries are safe
     community_id = None
@@ -189,6 +228,7 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
             task_id,
             "community",
             idempotency_key=f"{lineage_hash}_community",
+            _permit=_TRANSFER_CALL_PERMIT,
         )
         crew_id = _live_transfer(
             split.crew_cents,
@@ -196,6 +236,7 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
             task_id,
             "crew",
             idempotency_key=f"{lineage_hash}_crew",
+            _permit=_TRANSFER_CALL_PERMIT,
         )
         architect_id = _live_transfer(
             split.architect_cents,
@@ -203,6 +244,7 @@ def process_manna_payment(task_id: str, lineage_hash: str) -> PaymentResult:
             task_id,
             "architect",
             idempotency_key=f"{lineage_hash}_architect",
+            _permit=_TRANSFER_CALL_PERMIT,
         )
         return PaymentResult(
             task_id=task_id,
