@@ -23,7 +23,7 @@ TEMPLATE_SUFFIXES = (".example", ".sample", ".template", ".dist")
 SENSITIVE_ENV_NAMES = {".envrc", ".envrc.local", ".envrc.private"}
 
 SECRET_NAME = re.compile(
-    r"""^\s*(?:export\s+)?["']?(?P<name>(?:[A-Z][A-Z0-9_]*_)?(?:API[_-]?KEY|ADMIN[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|AUTHORIZATION|AUTH[_-]?TOKEN|BEARER|WEBHOOK[_-]?SECRET)[A-Z0-9_.-]*)["']?\s*[:=]\s*["']?(?P<value>[^"'#,;\r\n]*?)["']?\s*,?\s*(?:#.*)?$"""
+    r"""^\s*(?:export\s+)?["']?(?P<name>(?:[A-Z][A-Z0-9_]*_)?(?:API[_-]?KEY|ADMIN[_-]?KEY|SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE[_-]?KEY|ACCESS[_-]?KEY|AUTHORIZATION|AUTH[_-]?TOKEN|BEARER|WEBHOOK[_-]?SECRET|KEY)[A-Z0-9_.-]*)["']?\s*[:=]\s*["']?(?P<value>[^"'#,;\r\n]*?)["']?\s*,?\s*(?:#.*)?$"""
 )
 HIGH_CONFIDENCE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("PRIVATE_KEY_BLOCK", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----")),
@@ -165,6 +165,18 @@ class EnvFileScanner:
         return findings
 
 
+def _supports_assignment_scan(path: str) -> bool:
+    """Only parse key/value assignments in environment/config files; code files use token patterns."""
+    normalized = path.replace("\\", "/")
+    name = PurePosixPath(normalized).name.casefold()
+    suffix = PurePosixPath(name).suffix
+    return (
+        name.startswith(".env")
+        or name.endswith(".env")
+        or suffix in {".ini", ".yaml", ".yml", ".toml", ".cfg", ".conf", ".properties"}
+    )
+
+
 class CredentialPatternScanner:
     """Find likely credential material without retaining or displaying values."""
 
@@ -181,7 +193,7 @@ class CredentialPatternScanner:
                         source,
                         "Credential-like material detected; value intentionally redacted.",
                     )
-            assignment = SECRET_NAME.search(line)
+            assignment = SECRET_NAME.search(line) if _supports_assignment_scan(path) else None
             if assignment:
                 name = assignment.group("name").strip(chr(34) + chr(39)).casefold()
                 value = assignment.group("value")
