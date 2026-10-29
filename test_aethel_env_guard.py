@@ -126,7 +126,39 @@ class CredentialPatternScannerTests(unittest.TestCase):
         ]
         for row in rows:
             with self.subTest(variable=row.split("=")[0]):
-                self.assertTrue(self.scanner.scan_text("config.txt", row, source="tracked"))
+                self.assertTrue(self.scanner.scan_text("settings.env", row, source="tracked"))
+
+    def test_source_code_identifiers_do_not_trigger_assignment_heuristic(self):
+        rows = [
+            ("backend/auth.py", "token = issued_token"),
+            ("backend/federation.py", "authorization = bearer_scheme"),
+            ("backend/aethel_interface.py", "_bas_secret_bytes = secret.encode()"),
+            ("backend/biometric.py", "biometric_token = payload.token"),
+            ("docs/guide.md", "Authorization: Bearer <token>"),
+        ]
+        for path, line in rows:
+            with self.subTest(path=path):
+                findings = self.scanner.scan_text(path, line, source="tracked")
+                self.assertFalse(
+                    any(item.rule_id == "CREDENTIAL_ASSIGNMENT" for item in findings),
+                    msg=f"source-code heuristic triggered for {path}",
+                )
+
+    def test_configuration_assignment_still_triggers(self):
+        findings = self.scanner.scan_text(
+            "settings.yaml",
+            "COLONY_ADMIN_KEY: non-placeholder-value-38176",
+            source="tracked",
+        )
+        self.assertTrue(any(item.rule_id == "CREDENTIAL_ASSIGNMENT" for item in findings))
+
+    def test_ellipses_and_angle_bracket_placeholders_are_allowed(self):
+        for value in ("sk_test_...", "<generated-at-install>", "replace-me"):
+            with self.subTest(placeholder=value):
+                self.assertEqual(
+                    self.scanner.scan_text("template.env", "STRIPE_SECRET_KEY=" + value, source="tracked"),
+                    [],
+                )
 
 
 class GuardReportTests(unittest.TestCase):
