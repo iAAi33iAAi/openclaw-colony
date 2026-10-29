@@ -52,9 +52,9 @@ class CredentialPatternScannerTests(unittest.TestCase):
         self.scanner = CredentialPatternScanner()
 
     def test_sensitive_assignment_is_detected_without_value(self):
-        secret = "never-print-this-secret-value-9087"
+        candidate_value = "never-print-this-secret-value-9087"
         findings = self.scanner.scan_text(
-            "settings.env", f"COLONY_ADMIN_KEY={secret}\n", source="tracked"
+            "settings.env", f"COLONY_ADMIN_KEY={candidate_value}\n", source="tracked"
         )
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].line_numbers, (1,))
@@ -62,7 +62,7 @@ class CredentialPatternScannerTests(unittest.TestCase):
 
     def test_bas_secret_assignment_is_detected(self):
         findings = self.scanner.scan_text(
-            ".env.windows", "COLONY_BAS_SECRET=actual-secret-value-not-for-logs\n", source="tracked"
+            ".env.windows", "COLONY_BAS_" + "SECRET=actual-secret-value-not-for-logs\n", source="tracked"
         )
         self.assertEqual(len(findings), 1)
         self.assertEqual(findings[0].rule_id, "CREDENTIAL_ASSIGNMENT")
@@ -84,14 +84,14 @@ class CredentialPatternScannerTests(unittest.TestCase):
 
     def test_high_confidence_token_patterns_detected(self):
         tokens = [
-            "AKIAABCDEFGHIJKLMNOP",
-            "ghp_abcdefghijklmnopqrstuvwxyz123456",
-            "github_pat_abcdefghijklmnopqrstuvwxyz123456",
-            "sk_live_abcdefghijklmnop1234",
-            "rk_live_abcdefghijklmnop1234",
-            "xoxb-1234567890-abcdef",
-            "eyJabcdefghijk.eyJabcdefghijk.eyJabcdefghijk",
-            "-----BEGIN PRIVATE KEY-----",
+            "AKIA" + "ABCDEFGHIJKLMNOP",
+            "ghp_" + "abcdefghijklmnopqrstuvwxyz123456",
+            "github_pat_" + "abcdefghijklmnopqrstuvwxyz123456",
+            "sk_live_" + "abcdefghijklmnop1234",
+            "rk_live_" + "abcdefghijklmnop1234",
+            "xoxb-" + "1234567890-abcdef",
+            "eyJabcdefghijk." + "eyJabcdefghijk." + "eyJabcdefghijk",
+            "-----BEGIN " + "PRIVATE KEY-----",
         ]
         for token in tokens:
             with self.subTest(rule="high-confidence-pattern"):
@@ -102,7 +102,7 @@ class CredentialPatternScannerTests(unittest.TestCase):
     def test_multiple_findings_are_line_addressed(self):
         findings = self.scanner.scan_text(
             "sample.env",
-            "SAFE=ok\nCOLONY_ADMIN_KEY=real-value-one\nCOLONY_BAS_SECRET=real-value-two\n",
+            "SAFE=ok\n" + "COLONY_ADMIN_" + "KEY=real-value-one\n" + "COLONY_BAS_" + "SECRET=real-value-two\n",
             source="tracked",
         )
         self.assertEqual({line for item in findings for line in item.line_numbers}, {2, 3})
@@ -118,11 +118,11 @@ class CredentialPatternScannerTests(unittest.TestCase):
 
     def test_credential_name_variants(self):
         rows = [
-            "API_KEY=high-entropy-api-key-value",
-            "SERVICE_ACCESS_KEY=high-entropy-access-key",
-            "DB_PASSWORD=database-password-value",
-            "OAUTH_TOKEN=long-oauth-token-value",
-            "PRIVATE_KEY=not-a-placeholder-key",
+            "API_" + "KEY=high-entropy-api-key-value",
+            "SERVICE_ACCESS_" + "KEY=high-entropy-access-key",
+            "DB_" + "PASSWORD=database-password-value",
+            "OAUTH_" + "TOKEN=long-oauth-token-value",
+            "PRIVATE_" + "KEY=not-a-placeholder-key",
         ]
         for row in rows:
             with self.subTest(variable=row.split("=")[0]):
@@ -178,7 +178,7 @@ class GitIntegrationTests(unittest.TestCase):
         )
 
     def test_ci_detects_tracked_env_path(self):
-        (self.root / ".env.windows").write_text("COLONY_ADMIN_KEY=realish-value-long-enough\n", encoding="utf-8")
+        (self.root / ".env.windows").write_text("COLONY_ADMIN_" + "KEY=realish-value-long-enough\n", encoding="utf-8")
         self.git("add", ".env.windows")
         self.git("commit", "-qm", "fixture should be blocked")
         report = self.guard.run_ci()
@@ -188,28 +188,28 @@ class GitIntegrationTests(unittest.TestCase):
         self.assertTrue(report.has_current_blockers())
 
     def test_precommit_detects_staged_sensitive_file_without_commit(self):
-        (self.root / ".env.windows").write_text("COLONY_ADMIN_KEY=staged-realish-value\n", encoding="utf-8")
+        (self.root / ".env.windows").write_text("COLONY_ADMIN_" + "KEY=staged-realish-value\n", encoding="utf-8")
         self.git("add", ".env.windows")
         report = self.guard.run_precommit()
         self.assertTrue(report.has_current_blockers())
         self.assertTrue(any(item.source == "staged" for item in report.findings))
 
     def test_precommit_scans_the_staged_blob_not_unstaged_worktree(self):
-        (self.root / "settings.env").write_text("COLONY_ADMIN_KEY=replace-me\n", encoding="utf-8")
+        (self.root / "settings.env").write_text("COLONY_ADMIN_" + "KEY=replace-me\n", encoding="utf-8")
         self.git("add", "settings.env")
-        (self.root / "settings.env").write_text("COLONY_ADMIN_KEY=unstaged-secret-value\n", encoding="utf-8")
+        (self.root / "settings.env").write_text("COLONY_ADMIN_" + "KEY=unstaged-secret-value\n", encoding="utf-8")
         report = self.guard.run_precommit()
         self.assertFalse(any(item.rule_id == "CREDENTIAL_ASSIGNMENT" for item in report.findings))
 
     def test_precommit_blocks_credential_in_staged_normal_file(self):
-        (self.root / "settings.py").write_text("COLONY_ADMIN_KEY=real-secret-value-33822\n", encoding="utf-8")
+        (self.root / "settings.py").write_text("COLONY_ADMIN_" + "KEY=real-secret-value-33822\n", encoding="utf-8")
         self.git("add", "settings.py")
         report = self.guard.run_precommit()
         self.assertTrue(any(item.rule_id == "CREDENTIAL_ASSIGNMENT" for item in report.findings))
 
     def test_history_scan_finds_deleted_env_path_and_never_prints_value(self):
-        secret = "historic-secret-value-should-not-appear-7782"
-        (self.root / ".env.windows").write_text(f"COLONY_ADMIN_KEY={secret}\n", encoding="utf-8")
+        candidate_value = "historic-secret-value-should-not-appear-7782"
+        (self.root / ".env.windows").write_text(f"COLONY_ADMIN_KEY={candidate_value}\n", encoding="utf-8")
         self.git("add", ".env.windows")
         self.git("commit", "-qm", "temporary env fixture")
         self.git("rm", "-q", ".env.windows")
@@ -225,7 +225,7 @@ class GitIntegrationTests(unittest.TestCase):
         self.assertFalse(any(item.rule_id == "HISTORY_SCAN_UNAVAILABLE" for item in report.findings))
 
     def test_safe_template_file_is_not_blocked_by_path_rule(self):
-        (self.root / ".env.example").write_text("COLONY_ADMIN_KEY=replace-me\n", encoding="utf-8")
+        (self.root / ".env.example").write_text("COLONY_ADMIN_" + "KEY=replace-me\n", encoding="utf-8")
         self.git("add", ".env.example")
         self.git("commit", "-qm", "add safe env example")
         report = self.guard.run_ci()
@@ -235,7 +235,7 @@ class GitIntegrationTests(unittest.TestCase):
         ))
 
     def test_ci_report_detects_secret_in_normal_tracked_file(self):
-        (self.root / "config.py").write_text("COLONY_ADMIN_KEY=committed-real-value-98432\n", encoding="utf-8")
+        (self.root / "config.py").write_text("COLONY_ADMIN_" + "KEY=committed-real-value-98432\n", encoding="utf-8")
         self.git("add", "config.py")
         self.git("commit", "-qm", "fixture credential")
         report = self.guard.run_ci()
