@@ -16,10 +16,10 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from typing import TYPE_CHECKING
 
-from db import TransferAuthorizationNonce
+if TYPE_CHECKING:
+    from sqlalchemy.orm import Session
 
 SCHEMA = "aethel-transfer-admission/v1"
 MAX_TTL_SECONDS = 60
@@ -171,6 +171,14 @@ def verify_transfer_admission(
 
     if db is None:
         return False, "admission_nonce_store_unavailable"
+    try:
+        # Keep this module's import side-effect-free for lightweight callers
+        # (e.g. covenant/split checks) that do not install the ORM layer.
+        from sqlalchemy.exc import IntegrityError
+        from db import TransferAuthorizationNonce
+    except ImportError:
+        return False, "admission_nonce_store_unavailable"
+
     nonce_hash = hashlib.sha256(nonce.encode("utf-8")).hexdigest()
     try:
         db.add(
